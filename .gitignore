@@ -1,0 +1,32 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python virtual environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Test and coverage artifacts
+.coverage
+htmlcov/
+coverage.xml
+
+# Private user materials and runtime uploads
+data/private/
+data/uploads/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
