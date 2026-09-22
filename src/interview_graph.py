@@ -11,6 +11,8 @@ from claim_extractor import claim_extractor_node, read_markdown
 from interview_state import InterviewState
 from interviewer import interviewer_node
 from question_planner import question_planner_node
+from interview_router import interviewer_router
+
 
 
 def create_interview_graph():
@@ -22,11 +24,20 @@ def create_interview_graph():
     workflow.add_node("interviewer", interviewer_node)
     workflow.add_node("answer_evaluator", answer_evaluate_node)
 
+
     workflow.add_edge(START, "claim_extractor")
     workflow.add_edge("claim_extractor", "question_planner")
     workflow.add_edge("question_planner", "interviewer")
     workflow.add_edge("interviewer", "answer_evaluator")
-    workflow.add_edge("answer_evaluator", END)
+
+
+    #增加条件边
+    workflow.add_conditional_edges(
+        "answer_evaluator",
+        interviewer_router,
+        {"continue":"question_planner" , "end":END}
+
+    )
 
     checkpointer = InMemorySaver()
     return workflow.compile(checkpointer=checkpointer)

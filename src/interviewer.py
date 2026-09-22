@@ -14,15 +14,15 @@ from typing import Any
 
 
 def interviewer_node(state:dict[str, Any]) -> dict:
-    #校验当前current——claims是否为dict
+    #校验当=-0
     current_claim = state.get("current_claim")
     if current_claim is None:
             raise ValueError("缺少上游节点输出：state['current_claim']")
     if not isinstance(current_claim,dict):
         raise ValueError("state['current_claim']必须是dict")
-    
 
-    #校验current_question是否是非空字符串 
+
+    #校验current_question是否是非空字符串
     current_question = state.get("current_question")
     if not isinstance(current_question,str) or not current_question.strip():
         raise ValueError("current_question必须是非空字符串")
@@ -30,7 +30,7 @@ def interviewer_node(state:dict[str, Any]) -> dict:
     technology = current_claim.get("technology")
 
     #调用interrupt，把问题抛给前端
-    
+
     result = interrupt(
         {
          "question": f"{current_question}",
@@ -46,22 +46,23 @@ def interviewer_node(state:dict[str, Any]) -> dict:
     #去除首为空格
     result = result.strip()
 
-    interview_history = state.get("interview_history", [])
-    if not isinstance(interview_history, list):
-        raise ValueError("state['interview_history'] 必须是 list")
-    
+    interview_history = state.get("interview_history" , [])
+    #校验是否为list
+    if not isinstance(interview_history,list):
+         raise ValueError("当前取得的面试记录数据结构不是list！")
+
     #构造最终返回结果
-    
+
     turn_record = {
         "claim": current_claim,
         "question": current_question,
         "answer": result,
     }
+    turn_count = state.get("turn_count")+1
 
     return {
          "current_answer" : result,
+         "turn_count" : turn_count,
          "interview_history":[turn_record],
          "interview_status": "answer_received"
     }
-
-    

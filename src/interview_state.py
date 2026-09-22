@@ -16,3 +16,5 @@ class InterviewState(TypedDict, total=False):
     interview_history: Annotated[list[dict[str, Any]], operator.add]
     evaluation_result: dict[str, Any] | None
     interview_status: str
+    turn_count: int
+    max_turns: int
