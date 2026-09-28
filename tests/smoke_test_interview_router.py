@@ -16,7 +16,7 @@ def test_continue_route() -> None:
         "turn_count": 1,
         "max_turns": 3,
     }
-    assert interviewer_router(state) == "continue"
+    assert interviewer_router(state) == "next_topic"
     print("✅ 继续追问分支通过")
 
 
@@ -26,7 +26,7 @@ def test_max_turns_route() -> None:
         "turn_count": 3,
         "max_turns": 3,
     }
-    assert interviewer_router(state) == "end"
+    assert interviewer_router(state) == "report_generator"
     print("✅ 最大轮数结束分支通过")
 
 
@@ -36,8 +36,8 @@ def test_evaluator_end_route() -> None:
         "turn_count": 1,
         "max_turns": 3,
     }
-    assert interviewer_router(state) == "end"
-    print("✅ Evaluator 结束分支通过")
+    assert interviewer_router(state) == "next_topic"
+    print("✅ Evaluator 切换主题分支通过")
 
 
 if __name__ == "__main__":

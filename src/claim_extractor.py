@@ -3,6 +3,7 @@ import os
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from telemetry import invoke_model
 
 
 # 加载 .env 文件中的环境变量
@@ -53,14 +54,16 @@ def claim_extractor_node(state: dict) -> dict:
     #重要提示
     -只输出 JSON 数组，不要输出 Markdown 代码块，不要输出任何解释文字。
     -只提取材料中有明确证据支撑的技术主张。
-    材料中有几条就输出几条；没有则返回空数组 []。
+    -同一项目中相近的细节合并成一条项目级主张；优先职责、整体方案和关键取舍，避免把每个参数拆成单独主张。
+    -最多返回 8 条不同主题；每条最多附 2 条原文证据和 3 个追问方向。
+    -没有明确证据则返回空数组 []。
 
     """
     # 从 state 中读取 project_text
     project_text = state["project_text"]
 
     # 调用 Agent 获得 response
-    response = llm.invoke([SystemMessage(content=system_prompt),
+    response = invoke_model(llm, [SystemMessage(content=system_prompt),
                            HumanMessage(content=project_text)])
     # 调用 exchange_to_pyData(response) 得到 claims
     claims = exchange_to_pyData(response.content)
@@ -94,8 +97,6 @@ def exchange_to_pyData(response : str) ->list[dict[str, str | list[str]]]:
         raise ValueError("❌ 技术主张的最外层必须是 JSON 数组 []")
 
     # 5. 美化输出 JSON，ensure_ascii=False 保证中文不会变成 Unicode 编码
-     print("\n✅ 技术主张提取成功，共提取到", len(claims), "条：\n")
-     print(json.dumps(claims, ensure_ascii=False, indent=2))
      return claims
 
 

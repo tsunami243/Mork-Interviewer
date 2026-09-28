@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from json_utils import parse_json_object
+from telemetry import invoke_model
 
 
 load_dotenv()
@@ -95,6 +96,7 @@ def answer_evaluate_node(state: dict[str, Any]) -> dict[str, Any]:
         "current_claim": current_claim,
         "current_question": current_question.strip(),
         "current_answer": current_answer.strip(),
+
     }
     context_text = json.dumps(evaluation_context, ensure_ascii=False, indent=2)
 
@@ -123,16 +125,25 @@ def answer_evaluate_node(state: dict[str, Any]) -> dict[str, Any]:
 - strengths 和 missing_points 必须是字符串数组；feedback 和 follow_up_focus 必须是非空字符串。
 """
 
-    response = llm.invoke(
+    response = invoke_model(llm,
         [
             SystemMessage(content=system_prompt),
             HumanMessage(content=f"<evaluation_context>\n{context_text}\n</evaluation_context>"),
         ]
     )
     evaluation_result = parse_json_object(response.content)
+
     validate_evaluation_result(evaluation_result)
+    evaluation_record = {
+    "claim": current_claim,
+    "question": current_question.strip(),
+    "answer": current_answer.strip(),
+    "evaluation": evaluation_result,
+    }
 
     return {
-        "evaluation_result": evaluation_result,
+        "evaluation_result":evaluation_result,
+        "evaluation_history":[evaluation_record],
         "interview_status": "evaluation_ready",
+
     }

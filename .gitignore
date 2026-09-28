@@ -24,6 +24,10 @@ coverage.xml
 # Private user materials and runtime uploads
 data/private/
 data/uploads/
+data/.question-index/
+data/*.pdf
+data/*.doc
+data/*.docx
 
 # OS and editor files
 .DS_Store
