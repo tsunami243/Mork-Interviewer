@@ -36,8 +36,9 @@ def question_retrieval_node(state: dict[str, Any]) -> dict[str, Any]:
         "question_draft": selection["question"],
         "question_reason": selection["reason"],
         "chosen_reference_ids": selection["reference_ids"],
+        "chosen_wiki_ids": selection.get("wiki_reference_ids", []),
         "retrieval_status": selection["retrieval_status"],
-        "retrieval_log": [{"stage": stage, "status": selection["retrieval_status"], "tool_calls": selection["tool_calls"], "reference_ids": selection["reference_ids"]}],
+        "retrieval_log": [{"stage": stage, "status": selection["retrieval_status"], "tool_calls": selection["tool_calls"], "reference_ids": selection["reference_ids"], "wiki_ids": selection.get("wiki_reference_ids", [])}],
         "interview_status": "references_ready",
     }
 
@@ -46,6 +47,8 @@ def question_finalizer_node(state: dict[str, Any]) -> dict[str, Any]:
     draft = state.get("question_draft")
     if not _acceptable_question(draft):
         raise ValueError("出题节点未生成合格的单一问题")
+    if state.get("turn_count", 0) == 0 and state.get("question_stage") == "overview":
+        draft = "请介绍一下这个项目的目标和你负责的核心工作？"
     asked = {turn.get("question") for turn in state.get("interview_history", []) if isinstance(turn, dict)}
     if draft.strip() in asked:
         claim = state["current_claim"]

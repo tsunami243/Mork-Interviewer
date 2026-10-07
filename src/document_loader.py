@@ -131,9 +131,11 @@ def _extract_doc(data: bytes, source: str) -> str:
         raise DocumentLoadError(".doc 解析需要 Windows 与 Microsoft Word；可先另存为 .docx")
     try:
         from win32com.client import DispatchEx
+        import pythoncom
     except ImportError as exc:
         raise DocumentLoadError(".doc 解析需要 pywin32 和 Microsoft Word") from exc
 
+    pythoncom.CoInitialize()  # Background ingestion threads need their own COM apartment.
     try:
         with TemporaryDirectory(prefix="mock-interview-doc-") as directory:
             temporary_doc = Path(directory) / "source.doc"
@@ -160,6 +162,8 @@ def _extract_doc(data: bytes, source: str) -> str:
                         word.Quit()
     except Exception as exc:
         raise DocumentLoadError(f"无法用 Microsoft Word 读取 DOC：{source}") from exc
+    finally:
+        pythoncom.CoUninitialize()
 
 
 def combine_project_text(documents: Sequence[LoadedDocument]) -> str:

@@ -4,15 +4,17 @@ from math import isfinite
 from typing import Any
 
 from question_bank import QuestionReference
+from wiki_tools import WikiTools
 
 
 class QuestionRetrievalTools:
-    def __init__(self, bank: list[QuestionReference], stage: str, tags: list[str], excluded: set[str], index: dict | None):
+    def __init__(self, bank: list[QuestionReference], stage: str, tags: list[str], excluded: set[str], index: dict | None, wiki: WikiTools | None = None):
         self.bank = bank
         self.stage = stage
         self.tags = set(tags)
         self.excluded = excluded
         self.index = index
+        self.wiki = wiki if wiki is not None else WikiTools(tags)
         self.by_id = {item.id: item for item in bank}
         self.allowed = [item for item in bank if item.stage == stage and item.id not in excluded]
         self.seen_ids: list[str] = []
@@ -87,3 +89,9 @@ class QuestionRetrievalTools:
             "tool_log": {"status": "ok", "chunks_found": len(items), "reference_ids": [entry.id for entry in items]},
             "references": [entry.id for entry in items],
         }
+
+    def wiki_search(self) -> dict[str, Any]:
+        return self.wiki.search()
+
+    def wiki_read(self, page_id: str) -> dict[str, Any]:
+        return self.wiki.read(page_id)

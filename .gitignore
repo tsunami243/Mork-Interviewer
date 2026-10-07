@@ -34,3 +34,20 @@ data/*.docx
 Thumbs.db
 .vscode/
 .idea/
+
+# Private wiki uploads and derived vectors
+/data/wiki/sources/user-*.md
+/data/wiki/concepts/note-*.md
+/data/.wiki-index/
+
+# Generated v2 knowledge and intake state (tracked base pages still require manual review)
+/data/wiki/concepts/concept-*.md
+/data/wiki/questions/question-*.md
+/data/wiki/synthesis/synthesis-*.md
+/data/wiki/summaries/source-*.md
+/data/wiki/overview.md
+/data/wiki/log.md
+/data/wiki/.wiki-publishing.json
+/frontend/node_modules/
+/frontend/dist/
+/frontend/*.tsbuildinfo

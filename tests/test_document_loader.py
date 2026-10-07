@@ -87,7 +87,7 @@ class DocumentLoaderTests(unittest.TestCase):
 
         with (
             patch("document_loader.sys.platform", "win32"),
-            patch.dict(sys.modules, {"win32com": fake_package, "win32com.client": fake_client}),
+            patch.dict(sys.modules, {"win32com": fake_package, "win32com.client": fake_client, "pythoncom": Mock()}),
         ):
             loaded = load_uploaded_document("旧版.doc", signature + b"stub")
 

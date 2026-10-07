@@ -93,5 +93,5 @@ def load_question_index(bank: list[QuestionReference], model: str = DEFAULT_MODE
 def create_embedding_client() -> OpenAI:
     key, base_url, _ = embedding_settings()
     if not key:
-        raise ValueError("请先设置 DASHSCOPE_API_KEY，再离线构建题库向量索引")
+        raise ValueError("请先设置 DASHSCOPE_API_KEY，再构建向量索引")
     return OpenAI(api_key=key, base_url=base_url, timeout=25, max_retries=1)

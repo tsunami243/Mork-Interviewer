@@ -25,6 +25,7 @@ class InterviewState(TypedDict, total=False):
     question_stage: str
     question_draft: str
     chosen_reference_ids: list[str]
+    chosen_wiki_ids: list[str]
     used_question_ids: Annotated[list[str], operator.add]
     retrieval_status: str
     retrieval_log: Annotated[list[dict[str, Any]], operator.add]

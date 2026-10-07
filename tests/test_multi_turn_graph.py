@@ -69,7 +69,7 @@ class MultiTurnGraphTests(unittest.TestCase):
             events = []
             document = LoadedDocument("synthetic.md", "md", (TextSegment("Redis SessionStore 使用 session_id。"),))
             run = start_interview([document], on_progress=events.append)
-            self.assertEqual(run.question["question"], "你在项目中亲自负责什么？")
+            self.assertEqual(run.question["question"], "请介绍一下这个项目的目标和你负责的核心工作？")
             self.assertIn(("claim_extractor", "started"), [(event["stage"], event["status"]) for event in events])
             self.assertIn(("question_retrieval", "finished"), [(event["stage"], event["status"]) for event in events])
             self.assertNotIn("session_id", json.dumps(events, ensure_ascii=False))
@@ -103,7 +103,7 @@ class MultiTurnGraphTests(unittest.TestCase):
             graph = create_interview_graph()
             config = {"configurable": {"thread_id": "regression-two-turns"}}
             first = graph.invoke({"project_text": CLAIM["evidence"][0], "interview_history": [], "evaluation_history": [], "turn_count": 0, "max_turns": 2}, config=config)
-            self.assertEqual(first["__interrupt__"][0].value["question"], "你在这个项目里亲自负责什么？")
+            self.assertEqual(first["__interrupt__"][0].value["question"], "请介绍一下这个项目的目标和你负责的核心工作？")
             first_resume = graph.invoke(Command(resume="我负责会话隔离。"), config=config)
             self.assertEqual(first_resume["__interrupt__"][0].value["question"], "TTL 续期是怎样设计的？")
             self.assertEqual(retrieve.call_args_list[1].kwargs["previous_answer"], "我负责会话隔离。")
@@ -116,7 +116,7 @@ class MultiTurnGraphTests(unittest.TestCase):
             self.assertEqual(len(final["interview_history"]), 2)
             self.assertEqual(len(final["evaluation_history"]), 2)
             self.assertEqual(final["used_question_ids"], ["overview-01", "design-03"])
-            self.assertEqual([row["question"] for row in final["interview_history"]], ["你在这个项目里亲自负责什么？", "TTL 续期是怎样设计的？"])
+            self.assertEqual([row["question"] for row in final["interview_history"]], ["请介绍一下这个项目的目标和你负责的核心工作？", "TTL 续期是怎样设计的？"])
             self.assertEqual(final["interview_report"], REPORT)
             self.assertEqual(graph.get_state(config).next, ())
             self.assertEqual(extract.invoke.call_count, 1)

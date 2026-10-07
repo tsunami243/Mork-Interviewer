@@ -55,7 +55,7 @@
 
 ## 开发与测试
 
-当前已实现上传材料、逐轮问答和报告展示的 Streamlit 页面，终端版面试工作流仍可使用。开发计划与待办见 [开发进度记录](docs/development-plan.md)。
+当前默认界面为 React + TypeScript 工作台，由 FastAPI 连接现有 Python 面试与 Wiki 链路；旧 Streamlit 页面与终端版保留兼容。开发计划与待办见 [开发进度记录](docs/development-plan.md)。
 
 ### 分层题库与检索模式
 
@@ -87,7 +87,7 @@
 
 ```powershell
 uv pip install --python "..\.venv\Scripts\python.exe" -r requirements.txt
-& "..\.venv\Scripts\python.exe" -m streamlit run app.py --server.address 127.0.0.1
+.\scripts\start_workbench.ps1
 ```
 
 如果尚未配置模型服务，请先参考 `src/.env.example` 创建 `src/.env`，填写 `LLM_MODEL`、`LLM_API_KEY` 和 `LLM_BASE_URL`。已有配置不需要覆盖。页面会分别要求上传一份简历和一份项目材料，支持 PDF、MD、DOC、DOCX；可选面试轮数，完成后展示逐轮反馈和最终报告。
@@ -126,3 +126,21 @@ project_text = combine_project_text(materials)
 上传界面调用 `load_uploaded_document(uploaded.name, uploaded.getvalue())`，无需把上传内容保存到项目目录。PDF 需要有可提取的文本层；扫描件暂不支持 OCR。`.doc` 在 Windows 上依赖本机 Microsoft Word 和 `pywin32`，通过独立 Word 进程以只读、禁用宏的方式提取文字；其他系统请先将 `.doc` 转成 `.docx`。文件大小限制为每份 8 MB，PDF 最多 30 页，合并后的材料最多 120,000 字符。私有材料请放入被 `.gitignore` 排除的 `data/private/`，不要提交真实简历。
 
 旧版 `.doc` 的真实打开仍需人工核验：准备一份可放心读取的 `.doc`，在本机执行 `..\.venv\Scripts\python.exe tests/manual_check_legacy_doc.py "你的文件.doc"`。运行时注意 Word 是否出现安全提示、是否正常关闭，以及控制台是否显示非零提取字符数；此脚本不会打印文档正文。
+
+### 面试工作台与显式知识库拓展
+
+界面采用左侧导航/真实知识文件树，通过左侧栏切换模拟面试、文件浏览和知识图谱。文件详情顶部展示基本信息和可点击的来源、关联与反向链接卡片；文件树不再使用来源悬浮提示。选择文件不会编辑知识或推进面试。普通笔记可以浏览，但没有发布标志不会默认索引。
+
+“新建面试”弹窗中的简历与项目材料只用于本场面试，不写入知识库。中央对话区上方的“拓展现有知识库”打开专用建库弹窗：选择并上传文件即授权建库，弹窗自动关闭，右上角通知展示真实进度；后台完成解析、关联、发布和索引。不暴露排队、连接等内部操作选项。通知按红/黄/绿区分待执行、进行中和完成。
+
+原件、任务和授权状态持久化。未授权暂存不会被后台或重启拾取；旧版尚未完成的自动上传任务暂停待明确启动。来源ID、保守合并、失败重试和索引复用机制保留。模型调用可能产生费用，只有明确启动后才发起。
+
+新版启动和界面说明见 [Web 工作台](docs/web-workbench.md)，知识库流程说明见 [工作台与知识库说明](docs/wiki-intake.md)。现有知识页保留，工作台改造不等于已解决A-RAG的Wiki采用率或接入知识评分。
+
+### 知识图谱与阶段化 Wiki 更新
+
+图谱、sources/concepts/entities 核心生成、可选导航/深化阶段，以及复制文件后的授权补链已接入现有工作台。细则见 [知识图谱与分阶段工作流](docs/knowledge-graph-workflows.md)。复制文件只提醒，模型分析与补链写入分别需要确认，不会自动授予检索发布资格。
+
+### Wiki执行记录与局部恢复
+
+生成过程按阶段/页面记录调用、响应结构、耗时和缓存复用。核心任务失败后停在可恢复检查点，不再整批自动重试三轮；在进度详情或知识任务内可查看记录、明确调整预算并恢复。历史任务缺少记录时不估算旧费用。细则见 [执行与恢复](docs/wiki-execution-recovery.md)。

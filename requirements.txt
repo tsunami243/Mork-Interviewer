@@ -6,3 +6,10 @@ pypdf>=6.19,<7
 python-docx>=1.2,<2
 pywin32>=311; sys_platform == "win32"
 streamlit>=1.64,<2
+lancedb>=0.39,<1
+PyYAML>=6,<7
+psutil>=6,<8
+fastapi>=0.142,<1
+uvicorn>=0.34,<1
+python-multipart>=0.0.20,<1
+httpx>=0.28,<1
