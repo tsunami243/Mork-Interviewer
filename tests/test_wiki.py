@@ -96,7 +96,7 @@ class WikiTests(unittest.TestCase):
             document = load_uploaded_document("source.md", b"Redis introduction")
             page = wiki_store.approve_draft(document, {"title": "Redis", "body": "Redis helps caches.", "tags": ["Redis"], "links": []}, root)
             with patch.object(wiki_store, "WIKI_ROOT", root), patch("wiki_tools.load_wiki_index", return_value=None):
-                wiki = WikiTools(["Redis"])
+                wiki = WikiTools(["Redis"], namespaces=["personal"])
                 self.assertEqual(wiki.read(page.id)["tool_log"]["status"], "not_found")
                 self.assertIn(page.id, wiki.search()["references"])
                 self.assertIn("sources/user-", wiki.read(page.id)["tool_result"])
@@ -109,7 +109,7 @@ class WikiTests(unittest.TestCase):
                 {"title": "Redis", "body": "Discuss tradeoffs.", "tags": ["Redis"], "links": []}, root)
             bank = load_question_bank()
             with patch.object(wiki_store, "WIKI_ROOT", root), patch("wiki_tools.load_wiki_index", return_value=None):
-                tools = QuestionRetrievalTools(bank, "design", ["Redis"], set(), None, wiki=WikiTools(["Redis"]))
+                tools = QuestionRetrievalTools(bank, "design", ["Redis"], set(), None, wiki=WikiTools(["Redis"], namespaces=["personal"]))
                 responses = iter([
                     {"action": "wiki_search"}, {"action": "wiki_read", "reference_id": page.id},
                     {"action": "finish", "question": "你为什么采用缓存？", "reason": "关联技术取舍"},

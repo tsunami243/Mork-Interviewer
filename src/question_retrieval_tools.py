@@ -14,7 +14,7 @@ class QuestionRetrievalTools:
         self.tags = set(tags)
         self.excluded = excluded
         self.index = index
-        self.wiki = wiki if wiki is not None else WikiTools(tags)
+        self.wiki = wiki if wiki is not None else WikiTools(tags, namespaces=["personal"])
         self.by_id = {item.id: item for item in bank}
         self.allowed = [item for item in bank if item.stage == stage and item.id not in excluded]
         self.seen_ids: list[str] = []

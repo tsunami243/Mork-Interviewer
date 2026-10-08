@@ -8,7 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
-from threading import Lock
+from threading import Event,Lock,Thread
 from time import perf_counter,time
 from uuid import uuid4
 
@@ -32,6 +32,7 @@ from wiki_intake import IntakeService
 from wiki_uploads import UploadStore
 from wiki_actions import WikiActions
 from wiki_relations import graph_data
+from wiki_watcher import WikiChangeWatcher
 
 
 COOKIE='workbench_client'
@@ -109,7 +110,18 @@ def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=
     async def lifespan(app):
         service.recover();store.recover()
         ensure_worker(service,llm_factory,embedding_factory)
+        watcher=WikiChangeWatcher(service.root)
+        stop_watcher=Event()
+        def watch_wiki():
+            while not stop_watcher.wait(3):
+                try:
+                    watcher.poll()
+                except (OSError,ValueError,RuntimeError):
+                    pass
+        watcher_thread=Thread(target=watch_wiki,name='wiki-change-watcher',daemon=True)
+        watcher_thread.start()
         yield
+        stop_watcher.set(); watcher_thread.join(timeout=2)
         executor.shutdown(wait=False,cancel_futures=True)
         actions.close()
         wait_worker(service)
