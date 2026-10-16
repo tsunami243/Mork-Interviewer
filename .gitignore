@@ -48,6 +48,19 @@ Thumbs.db
 /data/wiki/overview.md
 /data/wiki/log.md
 /data/wiki/.wiki-publishing.json
+
+# Derived pages that can quote the user's own uploaded material
+# (interview transcripts, resumes, real company names and interview notes)
+/data/wiki/sources/source-*.md
+/data/wiki/entities/entity-*.md
+
+# Local scratch / learning drafts kept on disk but never pushed
+/src/pratice.py
+
+# Local evaluation artifacts (downloaded datasets, generated reports)
+/datasets/
+/diagnose_*.py
+/run_*.py
 /frontend/node_modules/
 /frontend/dist/
 /frontend/*.tsbuildinfo

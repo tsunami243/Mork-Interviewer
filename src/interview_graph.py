@@ -26,7 +26,7 @@ def route_selected_topic(state: InterviewState) -> str:
         return "report_generator"
     return "question_retrieval"
 
-def create_interview_graph():
+def create_interview_graph(checkpointer=None):
     """创建并编译支持多轮 interrupt/resume 的模拟面试工作流。"""
     workflow = StateGraph(InterviewState)
 
@@ -57,8 +57,7 @@ def create_interview_graph():
     )
     workflow.add_edge("report_generator", END)
 
-    checkpointer = InMemorySaver()
-    return workflow.compile(checkpointer=checkpointer)
+    return workflow.compile(checkpointer=checkpointer or InMemorySaver())
 
 
 def print_evaluation(evaluation: dict) -> None:

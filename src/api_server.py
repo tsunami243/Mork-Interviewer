@@ -33,6 +33,10 @@ from wiki_uploads import UploadStore
 from wiki_actions import WikiActions
 from wiki_relations import graph_data
 from wiki_watcher import WikiChangeWatcher
+from wiki_snapshot import get_snapshot, snapshot_status
+from interview_session import PersistentCheckpoint, restore_interview
+from interview_store import InterviewStore
+from profile_store import ProfileStore
 
 
 COOKIE='workbench_client'
@@ -81,12 +85,13 @@ class Session:
     error:str=''
     public:dict=field(default_factory=dict)
     submissions:dict=field(default_factory=dict)
+    profile_version_id:str|None=None
     lock:Lock=field(default_factory=Lock)
 
     def snapshot(self):
         with self.lock:
             return {**self.public,'id':self.id,'name':self.name,'status':self.status,'busy':self.busy,
-                    'phase':self.phase,'error':self.error,'max_turns':self.max_turns}
+                    'phase':self.phase,'error':self.error,'max_turns':self.max_turns,'profile_version_id':self.profile_version_id}
 
 
 def owner(request):
@@ -101,6 +106,9 @@ def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=
     store=UploadStore(service)
     actions=WikiActions(service,llm_factory,embedding_factory)
     sessions={};sessions_lock=Lock()
+    persistence=InterviewStore(service.directory / 'interviews.db')
+    checkpoints=PersistentCheckpoint(service.directory / 'checkpoints.db')
+    profiles=ProfileStore(service.directory / 'profile')
     executor=ThreadPoolExecutor(max_workers=2,thread_name_prefix='interview-api')
     dist=Path(frontend_dist or ROOT/'frontend'/'dist')
     with service.queue.connection() as db:
@@ -110,6 +118,7 @@ def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=
     async def lifespan(app):
         service.recover();store.recover()
         ensure_worker(service,llm_factory,embedding_factory)
+        get_snapshot(service.root, asynchronous=True)
         watcher=WikiChangeWatcher(service.root)
         stop_watcher=Event()
         def watch_wiki():
@@ -122,15 +131,16 @@ def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=
         watcher_thread.start()
         yield
         stop_watcher.set(); watcher_thread.join(timeout=2)
-        executor.shutdown(wait=False,cancel_futures=True)
+        executor.shutdown(wait=True,cancel_futures=True)
         actions.close()
         wait_worker(service)
+        checkpoints.close()
 
     app=FastAPI(title='Interview Workbench',lifespan=lifespan,docs_url=None,redoc_url=None)
     app.state.service=service;app.state.sessions=sessions;app.state.actions=actions
     app.add_middleware(TrustedHostMiddleware,allowed_hosts=['127.0.0.1','localhost','testserver'])
     app.add_middleware(CORSMiddleware,allow_origins=['http://127.0.0.1:5173','http://localhost:5173'],
-                       allow_credentials=True,allow_methods=['GET','POST'],allow_headers=['Content-Type','X-Workbench-Request'])
+                       allow_credentials=True,allow_methods=['GET','POST','DELETE'],allow_headers=['Content-Type','X-Workbench-Request'])
 
     @app.middleware('http')
     async def guard(request,call_next):
@@ -151,9 +161,28 @@ def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=
         response.headers['X-Frame-Options']='DENY'
         return response
 
+    def hydrate(owner_id):
+        from interview_graph import create_interview_graph
+        rows=persistence.list(owner_id)
+        for row in rows:
+            if row['id'] in sessions: continue
+            try:
+                run=restore_interview(lambda: create_interview_graph(checkpointer=checkpoints.saver), row['id'])
+            except Exception:
+                continue
+            record=Session(row['id'],row['owner'],row['name'],row['max_turns'],created=row['created_at'],run=run,
+                           busy=False,status='interrupted' if row['status'] in ('processing','preparing') else row['status'],
+                           phase='已恢复到上一完整轮次' if row['status'] in ('processing','preparing') else row['phase'],error=row['error'],profile_version_id=row['profile_version_id'])
+            state=run.state
+            record.public={'question':run.question,'turn_count':state.get('turn_count',row['last_complete_turn']),
+                           'history':state.get('interview_history',[]),'evaluations':state.get('evaluation_history',[]),
+                           'report':state.get('interview_report'),'metrics':state.get('stage_metrics',[])}
+            sessions[row['id']]=record
+
     def session_for(request,id):
         who=owner(request)
-        with sessions_lock:record=sessions.get(id)
+        with sessions_lock:
+            hydrate(who);record=sessions.get(id)
         if record is None or record.owner!=who:raise HTTPException(404,'会话不存在')
         return record
 
@@ -171,18 +200,27 @@ def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=
             record.public=public;record.busy=False;record.error=''
             record.status='waiting' if public['question'] else 'completed' if public['report'] else 'no_claims'
             record.phase='等待回答' if public['question'] else '面试结束'
+            persistence.save(record.id,status=record.status,phase=record.phase,error='',turn=public['turn_count'],pending_answer=None,state=state,
+                             question=(public['history'][-1].get('question') if public['history'] else None),
+                             answer=(public['history'][-1].get('answer') if public['history'] else None))
 
     def begin(record,files):
         try:
             with record.lock:record.phase='读取项目材料'
             started=perf_counter()
             documents=[load_uploaded_document(name,content) for name,content in files]
+            profile=profiles.save(documents[0],files[0][1])
+            persistence.set_profile(record.id,profile.id,profiles.snapshot(profile.id))
             elapsed=round((perf_counter()-started)*1000)
-            factory=interview_factory
-            if factory is None:
+            if interview_factory is None:
                 from interview_session import start_interview
-                factory=start_interview
-            record.run=factory(documents,record.max_turns,document_ms=elapsed,on_progress=lambda event:progress(record,event))
+                from interview_graph import create_interview_graph
+                record.run=start_interview(documents,record.max_turns,
+                    graph_factory=lambda: create_interview_graph(checkpointer=checkpoints.saver),
+                    profile_version_id=getattr(record,'profile_version_id',None),
+                    document_ms=elapsed,on_progress=lambda event:progress(record,event))
+            else:
+                record.run=interview_factory(documents,record.max_turns,document_ms=elapsed,on_progress=lambda event:progress(record,event))
             publish_snapshot(record)
         except DocumentLoadError as error:
             with record.lock:record.busy=False;record.status='error';record.error=str(error)
@@ -191,10 +229,15 @@ def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=
 
     def resume(record,text):
         try:
+            with record.lock:
+                record.busy=True;record.status='processing';record.phase='评估回答'
+                persistence.save(record.id,status='processing',phase='评估回答',turn=record.public.get('turn_count',0),pending_answer=text,state=record.run.state)
             record.run.resume(text,on_progress=lambda event:progress(record,event))
             publish_snapshot(record)
         except Exception:
-            with record.lock:record.busy=False;record.status='error';record.error='本轮处理未完成，现有记录保留；请检查模型服务后新建面试。'
+            with record.lock:
+                record.busy=False;record.status='interrupted';record.phase='已恢复到上一完整轮次';record.error='本轮处理被中断，回答已保留，可重新提交。'
+                persistence.save(record.id,status='interrupted',phase=record.phase,error=record.error,turn=record.public.get('turn_count',0),pending_answer=text,state=record.run.state)
 
     async def read_upload(file):
         data=await file.read(MAX_FILE_BYTES+1)
@@ -227,18 +270,21 @@ def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=
         if not re.fullmatch(r'[a-f0-9]{32}',value):value=uuid4().hex
         response.set_cookie(COOKIE,value,httponly=True,samesite='strict',max_age=7*86400)
         who=hashlib.sha256(value.encode()).hexdigest()
-        with sessions_lock:records=sorted((r for r in sessions.values() if r.owner==who),key=lambda r:r.created,reverse=True)
-        return {'files':file_listing(service.root),'groups':[{'name':name,'english':english} for name,english in GROUPS],
+        with sessions_lock:
+            hydrate(who);records=sorted((r for r in sessions.values() if r.owner==who),key=lambda r:r.created,reverse=True)
+        return {'files':file_listing(service.root, get_snapshot(service.root, asynchronous=True)),'groups':[{'name':name,'english':english} for name,english in GROUPS],
                 'sessions':[record.snapshot() for record in records],'uploads':uploads_for(who),
                 'configured':all(os.getenv(key) for key in ('LLM_MODEL','LLM_API_KEY','LLM_BASE_URL'))}
 
     @app.get('/api/library')
-    def library(request:Request):owner(request);return {'files':file_listing(service.root)}
+    def library(request:Request):
+        owner(request); snapshot=get_snapshot(service.root, asynchronous=True)
+        return {'files':file_listing(service.root, snapshot, asynchronous=True), 'snapshot':snapshot_status(service.root)}
 
     @app.get('/api/library/file')
     def detail(request:Request,path:str):
         owner(request)
-        try:return file_details(service.root,path)
+        try:return file_details(service.root,path,get_snapshot(service.root, asynchronous=True),asynchronous=True)
         except (OSError,ValueError):raise HTTPException(404,'该知识文件无法只读查看') from None
 
     @app.get('/api/knowledge/uploads')
@@ -338,7 +384,7 @@ def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=
     @app.get('/api/library/graph')
     def graph(request:Request):
         owner(request)
-        return graph_data(service.root)
+        return graph_data(service.root, get_snapshot(service.root, asynchronous=True), asynchronous=True)
 
     @app.get('/api/knowledge/activity')
     def activity(request:Request):
@@ -400,7 +446,8 @@ def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=
     @app.get('/api/interviews')
     def interviews(request:Request):
         who=owner(request)
-        with sessions_lock:records=sorted((r for r in sessions.values() if r.owner==who),key=lambda r:r.created,reverse=True)
+        with sessions_lock:
+            hydrate(who);records=sorted((r for r in sessions.values() if r.owner==who),key=lambda r:r.created,reverse=True)
         return {'sessions':[record.snapshot() for record in records]}
 
     @app.get('/api/interviews/{id}')
@@ -422,6 +469,8 @@ def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=
                 idle=next((r for r in own if not r.busy),None)
                 if idle:sessions.pop(idle.id,None)
             record=Session(uuid4().hex,who,Path(project_file.filename or '面试').stem[:60],max_turns)
+            persistence.create(session_id=record.id,owner=who,name=record.name,max_turns=max_turns,
+                               profile_version_id=None,profile_snapshot=None)
             sessions[record.id]=record
         executor.submit(begin,record,[(file.filename or 'unknown',content) for file,content in zip((resume_file,project_file),data)])
         return record.snapshot()
@@ -439,10 +488,20 @@ def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=
             else:
                 duplicate=False
                 if record.busy:raise HTTPException(409,'上一轮仍在处理中')
-                if record.status!='waiting' or record.run is None:raise HTTPException(409,'当前没有可回答的问题')
+                if record.status not in ('waiting','interrupted') or record.run is None:raise HTTPException(409,'当前没有可回答的问题')
                 record.submissions[data.request_id]=key;record.busy=True;record.status='processing';record.phase='评估回答'
         if not duplicate:executor.submit(resume,record,text)
         return record.snapshot()
+
+    @app.delete('/api/interviews/{id}')
+    def delete_interview(request:Request,id:str):
+        who=owner(request)
+        with sessions_lock:
+            record=sessions.get(id)
+            if record is not None and record.owner!=who: raise HTTPException(404,'会话不存在')
+            if not persistence.delete(id,who): raise HTTPException(404,'会话不存在')
+            sessions.pop(id,None)
+        return {'deleted':id}
 
     if (dist/'assets').is_dir():app.mount('/assets',StaticFiles(directory=dist/'assets'),name='assets')
     @app.get('/')

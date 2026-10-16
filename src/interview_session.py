@@ -1,14 +1,17 @@
-"""浏览器无关的面试会话适配层：启动、暂停与恢复。"""
+"""Browser-independent interview session adapter with durable checkpoints."""
+from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+import sqlite3
 from typing import Any, Callable, Sequence
 from uuid import uuid4
 
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
 from document_loader import LoadedDocument, combine_project_text
 from interview_graph import create_interview_graph
-
 
 MAX_ANSWER_CHARS = 3000
 
@@ -31,7 +34,15 @@ class InterviewRun:
     @property
     def question(self) -> dict[str, Any] | None:
         interrupts = self.result.get("__interrupt__", ())
-        return interrupts[0].value if interrupts else None
+        if interrupts:
+            return interrupts[0].value
+        try:
+            snapshot = self.graph.get_state(self.config)
+            if snapshot.interrupts:
+                return snapshot.interrupts[0].value
+        except (AttributeError, KeyError, TypeError, ValueError):
+            pass
+        return None
 
     def resume(self, answer: str, on_progress: Callable[[dict], None] | None = None) -> None:
         if self.question is None:
@@ -65,23 +76,43 @@ def start_interview(
     graph_factory: Callable[[], Any] | None = None,
     on_progress: Callable[[dict], None] | None = None,
     document_ms: int = 0,
+    thread_id: str | None = None,
+    profile_version_id: str | None = None,
 ) -> InterviewRun:
-    """文档只在开始时解析；之后各轮只恢复同一个 Graph 检查点。"""
+    """Parse documents once, then continue the same durable Graph checkpoint."""
     if type(max_turns) is not int or not 1 <= max_turns <= 8:
         raise ValueError("面试轮数须为 1 到 8 之间的整数")
     project_text = combine_project_text(documents)
     graph = (graph_factory or create_interview_graph)()
-    thread_id = uuid4().hex
+    thread_id = thread_id or uuid4().hex
     config = {"configurable": {"thread_id": thread_id}}
-    result = _execute(graph,
-        {
-            "project_text": project_text,
-            "interview_history": [],
-            "evaluation_history": [],
-            "turn_count": 0,
-            "max_turns": max_turns,
-        },
-        config,
-        on_progress,
-    )
+    result = _execute(graph, {
+        "project_text": project_text,
+        "interview_history": [],
+        "evaluation_history": [],
+        "turn_count": 0,
+        "max_turns": max_turns,
+        "profile_version_id": profile_version_id,
+    }, config, on_progress)
     return InterviewRun(graph=graph, thread_id=thread_id, result=result, document_ms=document_ms)
+
+
+def restore_interview(graph_factory: Callable[[], Any], thread_id: str, *, document_ms: int = 0) -> InterviewRun:
+    graph = graph_factory()
+    config = {"configurable": {"thread_id": thread_id}}
+    snapshot = graph.get_state(config)
+    result = {"__interrupt__": snapshot.interrupts} if snapshot.interrupts else {}
+    return InterviewRun(graph=graph, thread_id=thread_id, result=result, document_ms=document_ms)
+
+
+class PersistentCheckpoint:
+    """Owns a SQLite connection for LangGraph checkpoints during app lifetime."""
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.connection = sqlite3.connect(self.path, check_same_thread=False, timeout=30)
+        self.saver = SqliteSaver(self.connection)
+        self.saver.setup()
+
+    def close(self) -> None:
+        self.connection.close()

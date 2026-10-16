@@ -17,9 +17,11 @@ def link_targets(body):
     return LINK.findall(text)
 
 
-def documents(root):
+def documents(root, files=None, parsed_docs=None):
+    if parsed_docs is not None:
+        return parsed_docs
     result = {}
-    for item in catalog(root):
+    for item in (files if files is not None else catalog(root)):
         try:
             path = safe_file(root, item.relative)
             if path.stat().st_size > MAX_BYTES:
@@ -88,43 +90,71 @@ def source_aliases(root,docs=None):
     return {source:next(iter(paths)) for source,paths in owners.items() if len(paths)==1}
 
 
-def graph_data(root):
-    docs = documents(root); resolver = Resolver(docs); edges = {}; aliases=source_aliases(root,docs)
+def build_graph_data(docs, files, aliases=None):
+    """Pure graph builder; all filesystem parsing must happen before this call."""
+    resolver = Resolver(docs)
+    edges = {}
+    aliases = aliases if aliases is not None else source_aliases(None, docs)
     for path, doc in docs.items():
-        origin=aliases.get(path,path)
-        references = [(s,'来源引用') for s in doc['sources']]
-        references += [(s,'知识引用') for s in link_targets(doc['body'])]
-        relations=doc['fields'].get('relations',[])
-        if isinstance(relations,list):
-            references += [(r['target'], '弱引用' if r.get('origin')=='weak_relink' else
-                            '有依据的'+r.get('kind','reference')+'关联' if r.get('validation')=='evidence_supported' else '知识引用')
-                           for r in relations if isinstance(r,dict) and isinstance(r.get('target'),str)]
+        origin = aliases.get(path, path)
+        references = [(s, '来源引用') for s in doc['sources']]
+        references += [(s, '知识引用') for s in link_targets(doc['body'])]
+        relations = doc['fields'].get('relations', [])
+        if isinstance(relations, list):
+            references += [
+                (r['target'], '弱引用' if r.get('origin') == 'weak_relink' else
+                 '有依据的' + r.get('kind', 'reference') + '关联' if r.get('validation') == 'evidence_supported' else '知识引用')
+                for r in relations
+                if isinstance(r, dict) and isinstance(r.get('target'), str)
+            ]
         for reference, kind in references:
-            target = resolver.resolve(reference,path)
-            if not target:continue
-            target=aliases.get(target,target)
-            if target==origin:continue
-            key = tuple(sorted((origin,target)))
-            edge = edges.setdefault(key,{'source':key[0],'target':key[1],'types':[],'directions':[]})
-            if kind not in edge['types']: edge['types'].append(kind)
-            if [origin,target] not in edge['directions']: edge['directions'].append([origin,target])
-    # Large safe Markdown files still appear as isolated nodes; never read their bodies.
-    nodes = [{'id':f.relative,'path':f.relative,'title':f.title,'group':f.group,
-              'type':f.type or 'other','kind':KINDS.get(f.type,f.group)} for f in catalog(root) if f.relative not in aliases]
-    return {'nodes':nodes,'links':list(edges.values()),'source_aliases':aliases}
+            target = resolver.resolve(reference, path)
+            if not target:
+                continue
+            target = aliases.get(target, target)
+            if target == origin:
+                continue
+            key = tuple(sorted((origin, target)))
+            edge = edges.setdefault(key, {'source': key[0], 'target': key[1], 'types': [], 'directions': []})
+            if kind not in edge['types']:
+                edge['types'].append(kind)
+            if [origin, target] not in edge['directions']:
+                edge['directions'].append([origin, target])
+    nodes = [
+        {'id': item.relative, 'path': item.relative, 'title': item.title, 'group': item.group,
+         'type': item.type or 'other', 'kind': KINDS.get(item.type, item.group)}
+        for item in files if item.relative not in aliases
+    ]
+    return {'nodes': nodes, 'links': list(edges.values()), 'source_aliases': aliases}
 
 
-def relation_cards(root, relative):
-    graph = graph_data(root)
-    relative=graph['source_aliases'].get(relative,relative)
-    nodes = {n['id']:n for n in graph['nodes']}
+def graph_data(root, snapshot=None, *, asynchronous=False):
+    if snapshot is None:
+        from wiki_snapshot import get_snapshot
+        snapshot = get_snapshot(root, asynchronous=asynchronous)
+    return snapshot.graph
+
+
+def relation_cards(root, relative, snapshot=None, *, asynchronous=False):
+    if snapshot is None:
+        from wiki_snapshot import get_snapshot
+        snapshot = get_snapshot(root, asynchronous=asynchronous)
+    graph = snapshot.graph
+    relative = graph['source_aliases'].get(relative, relative)
+    nodes = {node['id']: node for node in graph['nodes']}
     result = []
     for edge in graph['links']:
-        if relative not in (edge['source'],edge['target']): continue
-        target = edge['target'] if edge['source']==relative else edge['source']
-        node = nodes[target]
+        if relative not in (edge['source'], edge['target']):
+            continue
+        target = edge['target'] if edge['source'] == relative else edge['source']
+        node = nodes.get(target)
+        if node is None:
+            continue
         labels = []
-        if any(a==relative for a,b in edge['directions']): labels.extend(edge['types'])
-        if any(b==relative for a,b in edge['directions']): labels.append('引用本页')
-        result.append({'path':target,'title':node['title'],'kind':node['kind'],'relations':list(dict.fromkeys(labels))})
+        if any(origin == relative for origin, _ in edge['directions']):
+            labels.extend(edge['types'])
+        if any(target_id == relative for _, target_id in edge['directions']):
+            labels.append('引用本页')
+        result.append({'path': target, 'title': node['title'], 'kind': node['kind'],
+                       'relations': list(dict.fromkeys(labels))})
     return result

@@ -4,7 +4,7 @@
 
 它接收用户的简历和项目材料，提取其中可验证的技术主张，围绕真实项目经历进行多轮追问，并最终生成基于证据的面试评估与学习建议。
 
-> 当前状态：本机可运行的浏览器版 MVP。面试出题已改为分层参考题库与 A-RAG 三工具检索；跨重启持久化尚未实现。
+> 当前状态：本机可运行的浏览器版。面试出题使用分层参考题库与 A-RAG 三工具检索；面试会话与知识库均已在 SQLite 中持久化，服务重启后可恢复。跨部署环境的分库与鉴权尚未实现。
 
 ## 1. 项目背景
 
@@ -53,25 +53,70 @@
 工作流程概念图：
 ![项目经历深挖与模拟面试 Agent 架构图](docs/image.png)
 
+## 快速开始
+
+### 1. 安装依赖
+
+本工作区把 Python 环境放在**本项目的上一级** `agentLoop/.venv`。在 `mock-interview-agent` 目录下执行：
+
+```powershell
+uv pip install --python "..\.venv\Scripts\python.exe" -r requirements.txt
+```
+
+### 2. 配置模型服务
+
+参考 `src/.env.example` 创建 `src/.env`（**该文件已被 `.gitignore` 排除，切勿提交**）：
+
+| 变量 | 用途 |
+| --- | --- |
+| `LLM_MODEL` / `LLM_API_KEY` / `LLM_BASE_URL` | 面试出题、评估、报告 |
+| `DASHSCOPE_API_KEY` | 知识库与题库向量索引（百炼） |
+| `EMBEDDING_MODEL` / `EMBEDDING_BASE_URL` | 向量模型，默认 `text-embedding-v4` |
+| `WIKI_MAX_*` | 建库任务的调用/token/耗时/页面预算 |
+
+### 3. 启动
+
+```powershell
+.\scripts\start_workbench.ps1
+```
+
+> ⚠️ 已知问题：该脚本用 `$PSScriptRoot/..` 推导 venv，实际比正确路径少一级，会报找不到解释器。在修复前请直接运行：
+>
+> ```powershell
+> ..\.venv\Scripts\python.exe -m uvicorn api_server:app --app-dir src --host 127.0.0.1 --port 8501
+> ```
+
+### 4. 访问
+
+启动后监听 **http://127.0.0.1:8501**（默认只监听本机）。前端资源由 `frontend/dist` 提供；改动前端后需重新构建：
+
+```powershell
+cd frontend; npm ci; npm run build
+```
+
 ## 开发与测试
 
-当前默认界面为 React + TypeScript 工作台，由 FastAPI 连接现有 Python 面试与 Wiki 链路；旧 Streamlit 页面与终端版保留兼容。开发计划与待办见 [开发进度记录](docs/development-plan.md)。
+当前默认界面为 React + TypeScript 工作台，由 FastAPI 连接 Python 面试与 Wiki 链路；旧 Streamlit 页面与终端版保留兼容。开发计划与待办见 [开发进度记录](docs/development-plan.md)，已确认缺陷见 [缺陷登记册](docs/engineering/defect-register.md)。
+
+### 面试会话持久化
+
+面试状态写入 SQLite（`src/interview_store.py`），配合 `PersistentCheckpoint` 保存事件检查点。关闭页面或重启服务后可在左侧会话列表恢复；前端显示“已恢复到上一完整轮次”表示回到最近一个完整轮次，而不是恢复半轮状态。
 
 ### 分层题库与检索模式
 
 - 项目自带 45 道原创面试参考题，按项目总览、设计、取舍、故障、复盘五个阶段组织。首次从项目职责和主链路切入，后续跟随上一轮回答追问；答充分则换未覆盖的技术主题。
 - 每轮检索 Agent 可使用本地 `keyword_search`、从缓存向量计算的 `semantic_search` 和 `chunk_read`，最多调用三次检索工具。参考题只供出题；评分继续依据上传的项目材料与用户回答。
-- 第一次开启语义检索之前，先在 `src/.env` 另行配置 `DASHSCOPE_API_KEY`，从项目根目录**手动构建一次公开题库索引**：
+- 第一次开启语义检索之前，先在 `src/.env` 配置 `DASHSCOPE_API_KEY`，从项目根目录**手动构建一次公开题库索引**：
 
 ```powershell
 & "..\.venv\Scripts\python.exe" scripts/build_question_index.py
 ```
 
-百炼向量模型默认 `text-embedding-v4`，使用北京地域兼容接口和 1024 维向量。索引写入被 Git 忽略的 `data/.question-index/`；题库或模型版本变化后需重新运行上面的命令。构建时只发送公开题库文本及受控标签，不发送上传的简历或回答；面试时使用预先缓存的受控标签向量，不调用百炼上传用户原文。没有百炼 Key 或索引时，页面会明确提示，并降级使用关键词与参考题，不应将此状态称为三工具齐备的 A-RAG。
+百炼向量模型默认 `text-embedding-v4`，使用兼容接口和 1024 维向量。索引写入被 Git 忽略的 `data/.question-index/`；题库或模型版本变化后需重新运行上面的命令。构建时只发送公开题库文本及受控标签，不发送上传的简历或回答；面试时使用预先缓存的受控标签向量，不调用百炼上传用户原文。没有百炼 Key 或索引时，页面会明确提示，并降级使用关键词与参考题，不应将此状态称为三工具齐备的 A-RAG。
 
 当模型服务使用官方 DeepSeek 地址时，结构化出题默认关闭思考模式以降低等待；如需回到原行为，可在 `src/.env` 设置 `LLM_THINKING_MODE=enabled`。其他兼容模型服务不会被附加这个参数。
 
-公开样本的一次性对比：旧链路首题约 19.8 秒、143 字；本次新链路首题约 7.1 秒、31 字；一轮回答后的追问约 2.9 秒。这些只是少量运行样例，**新链路测试时百炼索引未配置**，提速主要与关闭模型思考及压缩主张输出有关，不能将数字归因于完整语义 A-RAG，也不构成性能保证。阶段耗时、调用次数和 token 用量可在页面侧栏查看；日志不打印简历正文。
+公开样本的一次性对比：旧链路首题约 19.8 秒、143 字；新链路首题约 7.1 秒、31 字；一轮回答后的追问约 2.9 秒。这些只是少量运行样例，**测试时百炼索引未配置**，提速主要与关闭模型思考及压缩主张输出有关，不能将数字归因于完整语义 A-RAG，也不构成性能保证。阶段耗时、调用次数和 token 用量可在页面侧栏查看；日志不打印简历正文。
 
 如需自己测量，仅使用仓库公开的 `sample_project.md`，需显式确认这次模型调用会产生费用：
 
@@ -81,20 +126,9 @@
 
 面试题是否自然、相关、单一，需要按 [人工验收清单](docs/question-quality-checklist.md) 复查；离线单元测试不能替代真实面试体验。
 
-### 启动浏览器版
+### 离线回归测试
 
-本工作区将 Python 环境放在上级 `agentLoop/.venv`；在本项目根目录执行：
-
-```powershell
-uv pip install --python "..\.venv\Scripts\python.exe" -r requirements.txt
-.\scripts\start_workbench.ps1
-```
-
-如果尚未配置模型服务，请先参考 `src/.env.example` 创建 `src/.env`，填写 `LLM_MODEL`、`LLM_API_KEY` 和 `LLM_BASE_URL`。已有配置不需要覆盖。页面会分别要求上传一份简历和一份项目材料，支持 PDF、MD、DOC、DOCX；可选面试轮数，完成后展示逐轮反馈和最终报告。
-
-页面默认只监听本机地址，单份文件最多 8 MB。文件不写入仓库，但提取的文字会发送给你配置的模型服务。当前 `InMemorySaver` 仅保留进程内的检查点；关闭浏览器会话或重启服务后，无法恢复原面试。旧版 DOC 仍需本机 Microsoft Word，扫描 PDF 暂不支持 OCR。
-
-在 `mock-interview-agent` 目录执行离线回归测试（无需 API Key，不发送模型请求）：
+在 `mock-interview-agent` 目录执行（无需 API Key，不发送模型请求）：
 
 ```powershell
 ..\.venv\Scripts\python.exe -m unittest discover -s tests -p 'test_*.py' -v
@@ -104,11 +138,7 @@ uv pip install --python "..\.venv\Scripts\python.exe" -r requirements.txt
 
 ### 文档加载器
 
-`src/document_loader.py` 支持 `.md`、`.pdf`、`.docx` 和旧版 `.doc`。克隆仓库后，在当前 Python 环境安装本仓库依赖：
-
-```powershell
-uv pip install --python "..\.venv\Scripts\python.exe" -r requirements.txt
-```
+`src/document_loader.py` 支持 `.md`、`.pdf`、`.docx` 和旧版 `.doc`。
 
 从项目根目录加载本地材料：
 
@@ -141,6 +171,19 @@ project_text = combine_project_text(materials)
 
 图谱、sources/concepts/entities 核心生成、可选导航/深化阶段，以及复制文件后的授权补链已接入现有工作台。细则见 [知识图谱与分阶段工作流](docs/knowledge-graph-workflows.md)。复制文件只提醒，模型分析与补链写入分别需要确认，不会自动授予检索发布资格。
 
-### Wiki执行记录与局部恢复
+知识页的发布状态由 `src/knowledge_metadata.py` 维护在可重建的 SQLite 元数据中：内容哈希变化会退回 `pending_review`，只有 `approved` 页面才进入向量索引与检索；`src/wiki_watcher.py` 轮询外部编辑，防抖后同步状态。
+
+### 向量索引与执行记录
+
+知识库向量使用 LanceDB 持久化（`data/.wiki-index/`，已被 Git 忽略），按 namespace 隔离并保留上一版表以支持回滚。索引只收录 `approved` 页面，内容哈希未变的 chunk 复用旧向量，不重复计费。
 
 生成过程按阶段/页面记录调用、响应结构、耗时和缓存复用。核心任务失败后停在可恢复检查点，不再整批自动重试三轮；在进度详情或知识任务内可查看记录、明确调整预算并恢复。历史任务缺少记录时不估算旧费用。细则见 [执行与恢复](docs/wiki-execution-recovery.md)。
+
+## 已知问题与排查
+
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| 模型调用抛 `SSL: UNEXPECTED_EOF_WHILE_READING` | Windows 系统代理（如 Clash 的 `127.0.0.1:7897`）被 httpx 的 `trust_env` 读取，但该代理不可用于这些域名 | 设置 `NO_PROXY=api.deepseek.com,dashscope.aliyuncs.com,127.0.0.1,localhost` 后再启动 |
+| 知识已保存但提示“索引更新失败：BadRequestError” | `sync_wiki_index` 的异常被吞掉，事件只记录 `error_type`，前端看不到 provider 原文（如百炼欠费的 `Arrearage`） | 查看执行记录；百炼侧确认账号状态后重跑索引，无需重建知识库 |
+| `start_workbench.ps1` 报找不到解释器 | 脚本推导 venv 的路径少一级 | 见上文“启动”一节，直接运行 uvicorn 命令 |
+| 建库停在“已达到本任务预算” | 任务级预算（默认 64 次调用 / 10 万 token / 600 秒）用完即停机 | 在“查看执行记录与恢复预算”中明确提高上限后从检查点恢复；已消费计数不清零 |
