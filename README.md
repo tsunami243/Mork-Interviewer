@@ -80,11 +80,21 @@ uv pip install --python "..\.venv\Scripts\python.exe" -r requirements.txt
 .\scripts\start_workbench.ps1
 ```
 
-> ⚠️ 已知问题：该脚本用 `$PSScriptRoot/..` 推导 venv，实际比正确路径少一级，会报找不到解释器。在修复前请直接运行：
->
-> ```powershell
-> ..\.venv\Scripts\python.exe -m uvicorn api_server:app --app-dir src --host 127.0.0.1 --port 8501
-> ```
+脚本会自动定位 Python 解释器（依次尝试上一级 `.venv`、项目内 `.venv`），默认监听 8501，并为你设置好 `NO_PROXY` 以绕过本机系统代理。
+
+常用参数：
+
+| 参数 | 作用 |
+| --- | --- |
+| `-SkipBuild` | 跳过前端构建，`frontend/dist` 已存在时最快 |
+| `-Port 8502` | 换端口（8501 被占用时） |
+| `-NoProxy` | 不设置 `NO_PROXY`（本机代理可用时） |
+
+如果提示"禁止运行脚本"，用下面的方式绕过执行策略：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".\scripts\start_workbench.ps1" -SkipBuild
+```
 
 ### 4. 访问
 
@@ -185,5 +195,4 @@ project_text = combine_project_text(materials)
 | --- | --- | --- |
 | 模型调用抛 `SSL: UNEXPECTED_EOF_WHILE_READING` | Windows 系统代理（如 Clash 的 `127.0.0.1:7897`）被 httpx 的 `trust_env` 读取，但该代理不可用于这些域名 | 设置 `NO_PROXY=api.deepseek.com,dashscope.aliyuncs.com,127.0.0.1,localhost` 后再启动 |
 | 知识已保存但提示“索引更新失败：BadRequestError” | `sync_wiki_index` 的异常被吞掉，事件只记录 `error_type`，前端看不到 provider 原文（如百炼欠费的 `Arrearage`） | 查看执行记录；百炼侧确认账号状态后重跑索引，无需重建知识库 |
-| `start_workbench.ps1` 报找不到解释器 | 脚本推导 venv 的路径少一级 | 见上文“启动”一节，直接运行 uvicorn 命令 |
 | 建库停在“已达到本任务预算” | 任务级预算（默认 64 次调用 / 10 万 token / 600 秒）用完即停机 | 在“查看执行记录与恢复预算”中明确提高上限后从检查点恢复；已消费计数不清零 |
