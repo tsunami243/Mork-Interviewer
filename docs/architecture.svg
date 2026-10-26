@@ -1,0 +1,160 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1120" viewBox="0 0 1600 1120" role="img" aria-labelledby="title desc">
+  <title id="title">项目深挖与模拟面试 Agent 系统架构</title>
+  <desc id="desc">React 工作台通过 FastAPI 连接 LangGraph 面试链路和知识库构建链路，使用兼容大模型、向量服务及本地 SQLite、Markdown、LanceDB 和 JSON 索引持久化。</desc>
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#0F172A" flood-opacity="0.08"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#64748B"/>
+    </marker>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#2563EB"/>
+    </marker>
+    <style>
+      text { font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", Arial, sans-serif; fill: #0F172A; }
+      .title { font-size: 34px; font-weight: 700; letter-spacing: .3px; }
+      .subtitle { font-size: 16px; fill: #64748B; }
+      .section { font-size: 19px; font-weight: 700; }
+      .label { font-size: 15px; font-weight: 600; }
+      .small { font-size: 13px; fill: #475569; }
+      .tiny { font-size: 12px; fill: #64748B; }
+      .node { fill: #FFFFFF; stroke: #CBD5E1; stroke-width: 1.4; rx: 12; filter: url(#shadow); }
+      .edge { fill: none; stroke: #64748B; stroke-width: 1.8; marker-end: url(#arrow); }
+      .edge-blue { fill: none; stroke: #2563EB; stroke-width: 2; marker-end: url(#arrowBlue); }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1120" fill="#F8FAFC"/>
+  <rect x="0" y="0" width="1600" height="7" fill="#2563EB"/>
+  <text x="60" y="60" class="title">Project Deep-Dive &amp; Mock Interview Agent</text>
+  <text x="60" y="91" class="subtitle">两条业务主链，共享模型服务与本地持久化；面试材料与知识库上传保持入口隔离</text>
+  <rect x="1324" y="43" width="216" height="36" rx="18" fill="#EFF6FF" stroke="#BFDBFE"/>
+  <text x="1432" y="67" text-anchor="middle" class="small" fill="#1D4ED8">本机单实例工作台</text>
+
+  <!-- Access layer -->
+  <rect x="60" y="120" width="1480" height="166" rx="20" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5"/>
+  <text x="86" y="153" class="section">接入层</text>
+  <rect x="86" y="174" width="302" height="82" rx="12" fill="#F8FAFC" stroke="#CBD5E1"/>
+  <text x="237" y="205" text-anchor="middle" class="label">用户输入</text>
+  <text x="237" y="230" text-anchor="middle" class="small">简历 + 项目材料 / 建库文件 / 回答</text>
+  <path d="M388 215 H438" class="edge"/>
+  <rect x="440" y="162" width="450" height="106" rx="14" fill="#EFF6FF" stroke="#93C5FD" stroke-width="1.5"/>
+  <text x="665" y="193" text-anchor="middle" class="label">React 19 + TypeScript + Vite</text>
+  <text x="665" y="220" text-anchor="middle" class="small">面试对话 · 文件树 · 知识图谱 · 任务进度</text>
+  <text x="665" y="244" text-anchor="middle" class="tiny">HTTP JSON / multipart · 202 Accepted + 2.2s 轮询</text>
+  <path d="M890 215 H940" class="edge"/>
+  <rect x="942" y="162" width="572" height="106" rx="14" fill="#F0FDFA" stroke="#5EEAD4" stroke-width="1.5"/>
+  <text x="1228" y="193" text-anchor="middle" class="label">FastAPI + Uvicorn</text>
+  <text x="1228" y="220" text-anchor="middle" class="small">/api/interviews · /api/knowledge · /api/library</text>
+  <text x="1228" y="244" text-anchor="middle" class="tiny">Cookie owner 隔离 · 请求校验 · 后台线程 / Worker</text>
+
+  <!-- Interview lane -->
+  <rect x="60" y="326" width="930" height="416" rx="20" fill="#F5F8FF" stroke="#BFDBFE" stroke-width="1.5"/>
+  <text x="86" y="362" class="section">主链 A · 证据驱动的模拟面试</text>
+  <rect x="755" y="340" width="209" height="30" rx="15" fill="#DBEAFE"/>
+  <text x="859" y="360" text-anchor="middle" class="tiny" fill="#1D4ED8">LangGraph + SqliteSaver</text>
+
+  <rect x="86" y="392" width="154" height="76" class="node"/>
+  <text x="163" y="423" text-anchor="middle" class="label">Claim Extractor</text>
+  <text x="163" y="447" text-anchor="middle" class="small">主张 + 原文证据</text>
+  <path d="M240 430 H264" class="edge-blue"/>
+  <rect x="266" y="392" width="142" height="76" class="node"/>
+  <text x="337" y="423" text-anchor="middle" class="label">Topic Selector</text>
+  <text x="337" y="447" text-anchor="middle" class="small">主题与五阶段</text>
+  <path d="M408 430 H432" class="edge-blue"/>
+  <rect x="434" y="392" width="154" height="76" class="node"/>
+  <text x="511" y="423" text-anchor="middle" class="label">Question Retrieval</text>
+  <text x="511" y="447" text-anchor="middle" class="small">题库 + Wiki 检索</text>
+  <path d="M588 430 H612" class="edge-blue"/>
+  <rect x="614" y="392" width="154" height="76" class="node"/>
+  <text x="691" y="423" text-anchor="middle" class="label">Question Finalizer</text>
+  <text x="691" y="447" text-anchor="middle" class="small">单题校验与去重</text>
+  <path d="M768 430 H792" class="edge-blue"/>
+  <rect x="794" y="392" width="170" height="76" class="node"/>
+  <text x="879" y="420" text-anchor="middle" class="label">Interviewer</text>
+  <text x="879" y="445" text-anchor="middle" class="small">interrupt / resume</text>
+
+  <path d="M879 468 V500 H691 V527" class="edge-blue"/>
+  <rect x="614" y="529" width="154" height="76" class="node"/>
+  <text x="691" y="560" text-anchor="middle" class="label">Answer Evaluator</text>
+  <text x="691" y="584" text-anchor="middle" class="small">仅基于当前证据</text>
+  <path d="M768 567 H792" class="edge-blue"/>
+  <rect x="794" y="529" width="170" height="76" class="node"/>
+  <text x="879" y="560" text-anchor="middle" class="label">Router</text>
+  <text x="879" y="584" text-anchor="middle" class="small">继续 / 换题 / 报告</text>
+
+  <path d="M879 529 V496 H337 V468" class="edge"/>
+  <rect x="449" y="481" width="138" height="25" rx="12" fill="#F5F8FF"/>
+  <text x="518" y="498" text-anchor="middle" class="tiny">还有主题且未达轮数</text>
+  <path d="M964 567 H975 V635 H879" class="edge"/>
+  <rect x="794" y="635" width="170" height="70" rx="12" fill="#ECFDF5" stroke="#86EFAC" stroke-width="1.4"/>
+  <text x="879" y="664" text-anchor="middle" class="label">Report Generator</text>
+  <text x="879" y="687" text-anchor="middle" class="small">优势 · 薄弱点 · 建议</text>
+
+  <rect x="86" y="511" width="486" height="194" rx="14" fill="#FFFFFF" stroke="#C7D2FE" stroke-dasharray="5 4"/>
+  <text x="108" y="541" class="label">出题检索子流程（每轮工具预算 ≤ 3）</text>
+  <text x="108" y="570" class="small">题库：keyword_search · semantic_search · chunk_read</text>
+  <text x="108" y="597" class="small">Wiki：wiki_search · wiki_read（仅 approved 页面）</text>
+  <line x1="108" y1="616" x2="550" y2="616" stroke="#E2E8F0"/>
+  <text x="108" y="643" class="tiny">语义索引缺失、模型异常或预算耗尽时回退</text>
+  <text x="108" y="666" class="tiny">检索只影响提问，不作为回答评分标准</text>
+  <text x="108" y="689" class="tiny">overview → design → tradeoff → incident → reflection</text>
+  <path d="M511 511 V468" class="edge"/>
+
+  <!-- Knowledge lane -->
+  <rect x="1020" y="326" width="520" height="416" rx="20" fill="#F5FDF9" stroke="#BBF7D0" stroke-width="1.5"/>
+  <text x="1046" y="362" class="section">主链 B · 显式授权的知识库构建</text>
+  <rect x="1046" y="392" width="220" height="82" class="node"/>
+  <text x="1156" y="423" text-anchor="middle" class="label">上传与授权</text>
+  <text x="1156" y="448" text-anchor="middle" class="small">原件去重 · 任务入队</text>
+  <rect x="1292" y="392" width="222" height="82" class="node"/>
+  <text x="1403" y="423" text-anchor="middle" class="label">分析与规划</text>
+  <text x="1403" y="448" text-anchor="middle" class="small">证据定位 · 页面规划</text>
+  <path d="M1266 433 H1292" class="edge"/>
+  <rect x="1046" y="506" width="220" height="82" class="node"/>
+  <text x="1156" y="537" text-anchor="middle" class="label">生成与校验</text>
+  <text x="1156" y="562" text-anchor="middle" class="small">单页生成 · 来源校验</text>
+  <path d="M1403 474 V494 H1156 V506" class="edge"/>
+  <rect x="1292" y="506" width="222" height="82" class="node"/>
+  <text x="1403" y="537" text-anchor="middle" class="label">事务发布</text>
+  <text x="1403" y="562" text-anchor="middle" class="small">approved Markdown</text>
+  <path d="M1266 547 H1292" class="edge"/>
+  <rect x="1046" y="620" width="468" height="85" rx="12" fill="#ECFDF5" stroke="#86EFAC" stroke-width="1.4"/>
+  <text x="1280" y="650" text-anchor="middle" class="label">增量向量索引 + 执行检查点</text>
+  <text x="1280" y="676" text-anchor="middle" class="small">核心构建后停止 · 可选导航 / 深化 · 预算恢复</text>
+  <path d="M1403 588 V605 H1280 V620" class="edge"/>
+
+  <!-- Shared services -->
+  <path d="M525 742 V770" class="edge"/>
+  <path d="M1280 742 V770" class="edge"/>
+  <rect x="60" y="772" width="1480" height="120" rx="20" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5"/>
+  <text x="86" y="807" class="section">共享模型服务</text>
+  <rect x="86" y="826" width="426" height="44" rx="10" fill="#F5F3FF" stroke="#DDD6FE"/>
+  <text x="299" y="854" text-anchor="middle" class="small">OpenAI 兼容 LLM · 出题 / 评价 / 报告 / Wiki</text>
+  <rect x="536" y="826" width="480" height="44" rx="10" fill="#FFF7ED" stroke="#FED7AA"/>
+  <text x="776" y="854" text-anchor="middle" class="small">DashScope 兼容 Embedding · 离线题库 / Wiki 增量索引</text>
+  <rect x="1040" y="826" width="474" height="44" rx="10" fill="#F8FAFC" stroke="#E2E8F0"/>
+  <text x="1277" y="854" text-anchor="middle" class="small">面试时读取缓存题库向量，不上传回答做 Embedding</text>
+
+  <!-- Persistence -->
+  <path d="M525 892 V916" class="edge"/>
+  <path d="M1280 892 V916" class="edge"/>
+  <rect x="60" y="918" width="1480" height="162" rx="20" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5"/>
+  <text x="86" y="953" class="section">本地持久化</text>
+  <rect x="86" y="974" width="264" height="76" rx="11" fill="#F8FAFC" stroke="#CBD5E1"/>
+  <text x="218" y="1005" text-anchor="middle" class="label">面试与简历</text>
+  <text x="218" y="1030" text-anchor="middle" class="tiny">interviews.db · checkpoints.db · profile/</text>
+  <rect x="374" y="974" width="264" height="76" rx="11" fill="#F8FAFC" stroke="#CBD5E1"/>
+  <text x="506" y="1005" text-anchor="middle" class="label">任务与原件</text>
+  <text x="506" y="1030" text-anchor="middle" class="tiny">jobs.sqlite3 · uploads/</text>
+  <rect x="662" y="974" width="264" height="76" rx="11" fill="#F8FAFC" stroke="#CBD5E1"/>
+  <text x="794" y="1005" text-anchor="middle" class="label">知识内容</text>
+  <text x="794" y="1030" text-anchor="middle" class="tiny">data/wiki/ · knowledge.db</text>
+  <rect x="950" y="974" width="264" height="76" rx="11" fill="#F8FAFC" stroke="#CBD5E1"/>
+  <text x="1082" y="1005" text-anchor="middle" class="label">Wiki 向量</text>
+  <text x="1082" y="1030" text-anchor="middle" class="tiny">data/.wiki-index/ · LanceDB</text>
+  <rect x="1238" y="974" width="276" height="76" rx="11" fill="#F8FAFC" stroke="#CBD5E1"/>
+  <text x="1376" y="1005" text-anchor="middle" class="label">公开题库向量</text>
+  <text x="1376" y="1030" text-anchor="middle" class="tiny">data/.question-index/ · JSON</text>
+</svg>
