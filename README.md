@@ -1,198 +1,262 @@
 # Project Deep-Dive & Mock Interview Agent
 
-一个为解决面试焦虑而开发的面向特定求职场景的项目经历深挖与模拟面试 Agent。
+面向技术求职的**项目经历深挖与模拟面试工作台**：读取简历和项目材料，提取带原文证据的技术主张，围绕真实经历进行多轮追问，并生成可解释的面试反馈。
 
-它接收用户的简历和项目材料，提取其中可验证的技术主张，围绕真实项目经历进行多轮追问，并最终生成基于证据的面试评估与学习建议。
+![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![React 19](https://img.shields.io/badge/React-19-149ECA?logo=react&logoColor=white)
+![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph-1C3C3C)
+![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)
 
-> 当前状态：本机可运行的浏览器版。面试出题使用分层参考题库与 A-RAG 三工具检索；面试会话与知识库均已在 SQLite 中持久化，服务重启后可恢复。跨部署环境的分库与鉴权尚未实现。
+> **当前定位**：本机单实例学习与项目复盘工具，不是公网多用户 SaaS。默认界面为 React + FastAPI；面试记录、图检查点和知识任务使用本地 SQLite 持久化。Web 面试的真实跨进程恢复仍需补充重启回归验证，暂不作为稳定能力承诺。
 
-## 1. 项目背景
+## 为什么做这个项目
 
-在准备技术面试时，普通题库通常只能随机抽取“八股题”，很难围绕候选人真实做过的项目持续深挖。
+普通题库擅长检查“八股”，却很难验证候选人是否真正理解简历中的设计。这个项目把面试问题锚定到候选人自己的材料：
 
-例如，候选人在简历中写了“使用 Redis SessionStore 保存会话，并通过 TTL 处理过期”，面试官更关心的是：
+- **有据可问**：从技术主张和原文证据出发，而不是只按技术名词随机出题。
+- **持续深挖**：按项目总览、设计、取舍、故障、复盘五个阶段组织追问。
+- **评价可解释**：评价只使用当前主张、证据、问题和回答，不把通用知识当作候选人事实。
+- **知识可沉淀**：通过独立、显式授权的建库入口，把资料整理为可浏览、可关联、可检索的 Markdown 知识库。
 
-- Session 续期如何实现？
-- 多用户如何避免串话？
-- Redis 宕机或会话失效时如何降级？
-- 这个设计在多实例部署下是否仍然成立？
+## 核心能力
 
-本项目希望构建一个能够读取简历和简历中项目材料、根据材料证据进行追问的模拟面试 Agent。它不只问“你会不会”，更关注“你是否真的理解自己写在项目里的内容”。
+| 能力 | 当前实现 |
+| --- | --- |
+| 材料解析 | 支持 MD、PDF、DOCX；Windows 上可通过本机 Word 读取旧版 DOC |
+| 主张提取 | 最多提取 8 条技术主张，并保留可逐字核验的原文证据 |
+| 多轮面试 | LangGraph 状态图、`interrupt/resume`、主题切换、轮数上限和报告生成 |
+| 分层题库 | 45 道原创参考题，覆盖 5 个面试阶段；只辅助出题，不提供标准答案 |
+| 检索增强出题 | 题库关键词/缓存语义/题目读取，加上已发布 Wiki 的搜索与读取 |
+| 知识工作台 | 文件树、Markdown 预览、知识图谱、任务进度、执行记录与预算恢复 |
+| 本地持久化 | 面试 SQLite、图检查点、简历版本、任务原件、Markdown Vault、LanceDB 索引 |
+| 可观测性 | 节点耗时、模型调用与 token 用量；知识任务保留阶段和页面级执行记录 |
 
-## 2. 核心目标
+## 系统架构
 
-- 基于简历和项目材料生成有针对性的项目深挖问题。
-- 在多轮对话中记住上下文，像真实面试官一样持续追问。
-- 将用户回答与项目材料中的证据进行对照。
-- 输出可解释的面试报告，包括掌握较好的技术点、薄弱点和后续学习建议。
-- 避免泛化题库式问答，让问题尽可能来自用户自己的项目经历。
+![项目深挖与模拟面试 Agent 系统架构](docs/architecture.svg)
 
-## 3. 目标用户
+架构分为两条业务主链，共享模型服务和本地存储，但上传入口彼此独立：
 
-- 广大求职者。
-- 想进行项目复盘和技术面试训练的开发者。
-- 希望从真实项目材料中发现知识盲区的学习者。
+1. **模拟面试**：简历与项目材料只进入本场面试，不自动进入知识库。
+2. **知识库构建**：只有在“拓展现有知识库”入口选择文件后，才授权后台执行解析、模型分析和索引。
 
-## 4. 目标工作流
+### 面试主链
 
 ```text
-简历 PDF / 项目 README / 设计文档
-                ↓
-           文档解析与切分
-                ↓
-        技术主张提取与证据索引
-                ↓
-       LangGraph 多节点面试工作流
-                ↓
-技术点规划 → 多轮追问 → 回答评估 → 报告生成
-                ↓
-      面试记录 / 薄弱点 / 学习计划
-
+材料解析 → 主张提取 → 主题选择 → 检索出题 → 单题校验
+                                              ↓
+报告生成 ← 路由判断 ← 回答评价 ← interrupt/resume
+    ↑                                      │
+    └──── 已达轮数或无更多主题              └──── 继续追问 / 切换主题
 ```
 
-工作流程概念图：
-![项目经历深挖与模拟面试 Agent 架构图](docs/image.png)
+当前图包含 7 个业务节点：`claim_extractor`、`topic_selector`、`question_retrieval`、`question_finalizer`、`interviewer`、`answer_evaluator`、`report_generator`。
+
+题库 A-RAG 提供 `keyword_search`、`semantic_search`、`chunk_read`；Wiki 另提供 `wiki_search`、`wiki_read`。每轮最多执行 3 次检索工具，语义索引缺失、模型异常或预算耗尽时会使用本地候选和固定问题回退。
+
+**边界**：检索结果只影响提问；评分不检索完整项目材料，也不把 Wiki 内容当作候选人的项目事实。
+
+### 知识库主链
+
+```text
+显式上传与授权 → 原件去重 / 任务入队 → 分段分析与证据定位
+→ 页面规划 → 单页生成与校验 → 事务发布 → 增量向量索引
+```
+
+核心阶段完成后停止，不会自动继续导航整理或深化。后续阶段、复制文件补链和弱引用写入分别需要明确操作；失败任务可从检查点恢复，并受模型调用、token、耗时和页数预算约束。
 
 ## 快速开始
 
-### 1. 安装依赖
+### 环境要求
 
-本工作区把 Python 环境放在**本项目的上一级** `agentLoop/.venv`。在 `mock-interview-agent` 目录下执行：
+- Windows / PowerShell（默认启动脚本）
+- Python 3.12 与 [uv](https://docs.astral.sh/uv/)
+- Node.js `^20.19.0` 或 `>=22.12.0`
+- 一个 OpenAI 兼容的 LLM 服务；语义索引另需 DashScope 兼容 Embedding 服务
+
+以下命令均在 `mock-interview-agent` 目录执行。
+
+### 1. 安装 Python 依赖
+
+父级虚拟环境不存在时先创建：
 
 ```powershell
+uv venv ..\.venv
 uv pip install --python "..\.venv\Scripts\python.exe" -r requirements.txt
 ```
 
-### 2. 配置模型服务
+启动脚本也支持项目内 `.venv`；独立部署时相应调整下面的解释器路径。
 
-参考 `src/.env.example` 创建 `src/.env`（**该文件已被 `.gitignore` 排除，切勿提交**）：
+### 2. 配置模型
 
-| 变量 | 用途 |
-| --- | --- |
-| `LLM_MODEL` / `LLM_API_KEY` / `LLM_BASE_URL` | 面试出题、评估、报告 |
-| `DASHSCOPE_API_KEY` | 知识库与题库向量索引（百炼） |
-| `EMBEDDING_MODEL` / `EMBEDDING_BASE_URL` | 向量模型，默认 `text-embedding-v4` |
-| `WIKI_MAX_*` | 建库任务的调用/token/耗时/页面预算 |
+复制 `src/.env.example` 为 `src/.env`，至少填写：
 
-### 3. 启动
+```dotenv
+LLM_MODEL=your-model
+LLM_API_KEY=your-api-key
+LLM_BASE_URL=https://your-openai-compatible-endpoint/v1
+```
+
+`src/.env` 已被 Git 忽略，不要提交真实密钥。完整配置见下文[环境变量](#环境变量)。
+
+### 3. 启动工作台
 
 ```powershell
 .\scripts\start_workbench.ps1
 ```
 
-脚本会自动定位 Python 解释器（依次尝试上一级 `.venv`、项目内 `.venv`），默认监听 8501，并为你设置好 `NO_PROXY` 以绕过本机系统代理。
+脚本会定位 Python 环境、安装或构建前端，并启动仅监听本机的 FastAPI 服务。访问：
+
+```text
+http://127.0.0.1:8501
+```
 
 常用参数：
 
-| 参数 | 作用 |
+| 命令 | 用途 |
 | --- | --- |
-| `-SkipBuild` | 跳过前端构建，`frontend/dist` 已存在时最快 |
-| `-Port 8502` | 换端口（8501 被占用时） |
-| `-NoProxy` | 不设置 `NO_PROXY`（本机代理可用时） |
+| `.\scripts\start_workbench.ps1 -SkipBuild` | 复用已有 `frontend/dist`，跳过前端构建 |
+| `.\scripts\start_workbench.ps1 -Port 8502` | 修改监听端口 |
+| `.\scripts\start_workbench.ps1 -NoProxy` | 不自动设置 `NO_PROXY` |
 
-如果提示"禁止运行脚本"，用下面的方式绕过执行策略：
+PowerShell 禁止执行脚本时：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File ".\scripts\start_workbench.ps1" -SkipBuild
 ```
 
-### 4. 访问
+### 4. 可选：构建题库语义索引
 
-启动后监听 **http://127.0.0.1:8501**（默认只监听本机）。前端资源由 `frontend/dist` 提供；改动前端后需重新构建：
-
-```powershell
-cd frontend; npm ci; npm run build
-```
-
-## 开发与测试
-
-当前默认界面为 React + TypeScript 工作台，由 FastAPI 连接 Python 面试与 Wiki 链路；旧 Streamlit 页面与终端版保留兼容。开发计划与待办见 [开发进度记录](docs/development-plan.md)，已确认缺陷见 [缺陷登记册](docs/engineering/defect-register.md)。
-
-### 面试会话持久化
-
-面试状态写入 SQLite（`src/interview_store.py`），配合 `PersistentCheckpoint` 保存事件检查点。关闭页面或重启服务后可在左侧会话列表恢复；前端显示“已恢复到上一完整轮次”表示回到最近一个完整轮次，而不是恢复半轮状态。
-
-### 分层题库与检索模式
-
-- 项目自带 45 道原创面试参考题，按项目总览、设计、取舍、故障、复盘五个阶段组织。首次从项目职责和主链路切入，后续跟随上一轮回答追问；答充分则换未覆盖的技术主题。
-- 每轮检索 Agent 可使用本地 `keyword_search`、从缓存向量计算的 `semantic_search` 和 `chunk_read`，最多调用三次检索工具。参考题只供出题；评分继续依据上传的项目材料与用户回答。
-- 第一次开启语义检索之前，先在 `src/.env` 配置 `DASHSCOPE_API_KEY`，从项目根目录**手动构建一次公开题库索引**：
+首次使用语义检索，或题库、Embedding 模型变化后执行：
 
 ```powershell
 & "..\.venv\Scripts\python.exe" scripts/build_question_index.py
 ```
 
-百炼向量模型默认 `text-embedding-v4`，使用兼容接口和 1024 维向量。索引写入被 Git 忽略的 `data/.question-index/`；题库或模型版本变化后需重新运行上面的命令。构建时只发送公开题库文本及受控标签，不发送上传的简历或回答；面试时使用预先缓存的受控标签向量，不调用百炼上传用户原文。没有百炼 Key 或索引时，页面会明确提示，并降级使用关键词与参考题，不应将此状态称为三工具齐备的 A-RAG。
+索引写入 `data/.question-index/`。面试过程只读取缓存向量；没有索引时仍可降级使用关键词检索和参考题。
 
-当模型服务使用官方 DeepSeek 地址时，结构化出题默认关闭思考模式以降低等待；如需回到原行为，可在 `src/.env` 设置 `LLM_THINKING_MODE=enabled`。其他兼容模型服务不会被附加这个参数。
+## 使用流程
 
-公开样本的一次性对比：旧链路首题约 19.8 秒、143 字；新链路首题约 7.1 秒、31 字；一轮回答后的追问约 2.9 秒。这些只是少量运行样例，**测试时百炼索引未配置**，提速主要与关闭模型思考及压缩主张输出有关，不能将数字归因于完整语义 A-RAG，也不构成性能保证。阶段耗时、调用次数和 token 用量可在页面侧栏查看；日志不打印简历正文。
+1. 在“新建面试”中上传一份简历和一份项目材料，设置 1–8 轮。
+2. 等待材料解析与首题生成；页面通过轮询更新，不使用 WebSocket 或 token 流式输出。
+3. 回答问题后查看评价，系统根据覆盖情况继续追问、切换主题或生成报告。
+4. 如需建设知识库，单独打开“拓展现有知识库”并选择文件；选择即授权本次模型与索引调用。
+5. 在文件树、知识图谱和任务通知中查看发布内容、关联与执行记录。
 
-如需自己测量，仅使用仓库公开的 `sample_project.md`，需显式确认这次模型调用会产生费用：
+上传限制：单文件 8 MB、PDF 最多 30 页、面试合并材料最多 120,000 字符。扫描 PDF 暂不支持 OCR；DOC 依赖 Windows、本机 Microsoft Word 与 `pywin32`。
+
+## 项目结构
+
+```text
+mock-interview-agent/
+├── frontend/                    # React + TypeScript 工作台
+│   └── src/
+│       ├── App.tsx              # 面试、上传与文件浏览主界面
+│       ├── KnowledgeActivity.tsx# 阶段任务、补链与确认操作
+│       ├── KnowledgeGraph.tsx   # 知识图谱
+│       └── ExecutionDetails.tsx # 执行记录与预算恢复
+├── src/
+│   ├── api_server.py            # FastAPI 入口与资源 owner 隔离
+│   ├── interview_graph.py       # LangGraph 节点与路由装配
+│   ├── interview_session.py     # invoke / resume / checkpoint 适配
+│   ├── interview_store.py       # 面试会话、消息与事件持久化
+│   ├── claim_extractor.py       # 技术主张与证据提取
+│   ├── topic_selector.py        # 主题和五阶段推进
+│   ├── question_retrieval*.py   # 题库与 Wiki 检索 Agent
+│   ├── interviewer.py           # interrupt / resume 节点
+│   ├── answer_evaluator.py      # 基于当前证据的回答评价
+│   ├── report_generator.py      # 面试总结与学习建议
+│   ├── document_loader.py       # MD / PDF / DOCX / DOC 解析
+│   ├── wiki_intake.py           # 知识分析、生成、发布与恢复主流程
+│   ├── wiki_automatic.py        # 后台核心构建 Worker
+│   ├── wiki_publish.py          # 多文件事务发布与回滚
+│   ├── wiki_index.py            # LanceDB 增量索引
+│   └── knowledge_metadata.py    # 页状态、来源与关系元数据
+├── scripts/
+│   ├── start_workbench.ps1      # 默认启动器
+│   ├── build_question_index.py  # 公开题库向量构建
+│   └── benchmark_questioning.py # 显式 --live 的公开样本测速
+├── tests/                       # 离线回归与手动模型冒烟测试
+├── eval/                        # 独立评测与 Langfuse 工程
+├── data/
+│   ├── question_bank.json       # 45 道公开参考题
+│   ├── sample_project.md        # 公开示例材料
+│   ├── wiki/                    # Obsidian 兼容 Markdown Vault
+│   └── private/                 # 私有运行数据，Git 忽略
+└── docs/                        # 架构、流程、评测与工程记录
+```
+
+## 数据与持久化
+
+| 数据 | 默认位置 |
+| --- | --- |
+| 面试会话、消息与事件 | `data/private/wiki-ingest/interviews.db` |
+| LangGraph 检查点 | `data/private/wiki-ingest/checkpoints.db` |
+| 简历原件与解析文本 | `data/private/wiki-ingest/profile/` |
+| 知识任务与执行记录 | `data/private/wiki-ingest/jobs.sqlite3` |
+| 建库上传原件 | `data/private/wiki-ingest/uploads/` |
+| 知识页元数据 | `data/private/knowledge.db` |
+| 已发布知识页 | `data/wiki/` |
+| Wiki 向量索引 | `data/.wiki-index/` |
+| 公开题库向量 | `data/.question-index/` |
+
+“面试附件不入知识库”不等于“不保存”：简历与面试状态会写入上述本地私有目录。请勿提交真实简历、API Key 或运行数据库。
+
+## 环境变量
+
+| 变量 | 用途 / 默认值 |
+| --- | --- |
+| `LLM_MODEL` / `LLM_API_KEY` / `LLM_BASE_URL` | 面试与 Wiki 的 OpenAI 兼容模型配置 |
+| `LLM_THINKING_MODE` | 默认 `disabled`；仅对官方 DeepSeek 地址附加对应参数 |
+| `DASHSCOPE_API_KEY` | 构建题库向量、更新 Wiki 向量时使用 |
+| `EMBEDDING_MODEL` | 默认 `text-embedding-v4` |
+| `EMBEDDING_BASE_URL` | DashScope 兼容 Embedding 地址 |
+| `WIKI_MAX_MODEL_CALLS` | 单任务模型调用预算，默认 64 |
+| `WIKI_MAX_TOKENS` | 已报告 token 预算，默认 100000；不是绝对计费保证 |
+| `WIKI_MAX_ACTIVE_SECONDS` | 单任务累计活动耗时，默认 600 秒 |
+| `WIKI_MAX_PAGES` | 单任务页面预算，默认 24 |
+| `WIKI_CONCURRENCY` | 分段和页面生成并发，默认 3 |
+| `WIKI_REQUEST_ATTEMPTS` | 单次逻辑请求的网络尝试次数，默认 2 |
+| `NO_PROXY` / `no_proxy` | 启动脚本默认配置，用于绕过本机代理 |
+
+## 测试与评测
+
+离线 Python 回归不需要 API Key，使用假模型验证图路由、接口契约、发布事务、增量索引和任务恢复：
 
 ```powershell
-& "..\.venv\Scripts\python.exe" scripts/benchmark_questioning.py --live
+& "..\.venv\Scripts\python.exe" -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-面试题是否自然、相关、单一，需要按 [人工验收清单](docs/question-quality-checklist.md) 复查；离线单元测试不能替代真实面试体验。
-
-### 离线回归测试
-
-在 `mock-interview-agent` 目录执行（无需 API Key，不发送模型请求）：
+前端类型检查与生产构建：
 
 ```powershell
-..\.venv\Scripts\python.exe -m unittest discover -s tests -p 'test_*.py' -v
+Push-Location frontend
+npm.cmd ci
+npm.cmd run build
+Pop-Location
 ```
 
-`tests/smoke_test_*.py` 为手动冒烟测试；其中 Claim Extractor 和 Answer Evaluator 的测试会调用真实模型，需要先配置对应的环境变量。不要把真实密钥提交到仓库。
+`tests/smoke_test_*.py` 是手动冒烟测试，其中部分会调用真实模型并产生费用，不属于默认离线回归。`eval/` 提供独立的分阶段评测入口；确定性测试与真实模型评测应分开解读。
 
-### 文档加载器
+## 降级与边界
 
-`src/document_loader.py` 支持 `.md`、`.pdf`、`.docx` 和旧版 `.doc`。
+| 场景 | 行为或限制 |
+| --- | --- |
+| 题库向量未构建或指纹失效 | 语义工具不可用，回退到关键词、题目读取与本地候选 |
+| 检索模型异常、非法输出或预算耗尽 | 使用已见参考题或当前阶段候选，不阻断整场面试 |
+| Wiki 向量不可用 | 仍尝试已发布 Markdown 的关键词召回 |
+| 回答评分 | 使用当前主张及其证据，不是完整材料向量 RAG |
+| 自动知识发布 | 包含结构、来源与版本校验，不等于人工事实审核 |
+| 多用户与鉴权 | Cookie owner 用于本机资源隔离，不是账号认证体系 |
+| Web 会话恢复 | 已有 SQLite 会话和检查点实现；真实跨进程恢复仍需专项回归 |
+| 质量结论 | 离线测试证明状态与契约，不证明真实模型出题质量、检索采用率或成本 |
 
-从项目根目录加载本地材料：
+## 排查与文档
 
-```python
-from pathlib import Path
-from src.document_loader import combine_project_text, load_document
+- 模型请求出现 `SSL: UNEXPECTED_EOF_WHILE_READING`：检查 Windows 代理，并为模型和 Embedding 域名设置 `NO_PROXY`。
+- 知识页已发布但索引失败：查看任务执行记录，确认 Embedding 服务状态后恢复；无需重新生成知识页。
+- 任务提示达到预算：在执行详情中明确提高预算并从检查点继续，已消费计数不会清零。
 
-materials = [
-    load_document(Path("data/sample_project.md")),
-    load_document(Path("data/private/my-resume.pdf")),
-]
-project_text = combine_project_text(materials)
-```
+进一步阅读：[Web 工作台](docs/web-workbench.md) · [知识库流程](docs/wiki-intake.md) · [知识图谱工作流](docs/knowledge-graph-workflows.md) · [执行与恢复](docs/wiki-execution-recovery.md) · [缺陷登记册](docs/engineering/defect-register.md)
 
-上传界面调用 `load_uploaded_document(uploaded.name, uploaded.getvalue())`，无需把上传内容保存到项目目录。PDF 需要有可提取的文本层；扫描件暂不支持 OCR。`.doc` 在 Windows 上依赖本机 Microsoft Word 和 `pywin32`，通过独立 Word 进程以只读、禁用宏的方式提取文字；其他系统请先将 `.doc` 转成 `.docx`。文件大小限制为每份 8 MB，PDF 最多 30 页，合并后的材料最多 120,000 字符。私有材料请放入被 `.gitignore` 排除的 `data/private/`，不要提交真实简历。
-
-旧版 `.doc` 的真实打开仍需人工核验：准备一份可放心读取的 `.doc`，在本机执行 `..\.venv\Scripts\python.exe tests/manual_check_legacy_doc.py "你的文件.doc"`。运行时注意 Word 是否出现安全提示、是否正常关闭，以及控制台是否显示非零提取字符数；此脚本不会打印文档正文。
-
-### 面试工作台与显式知识库拓展
-
-界面采用左侧导航/真实知识文件树，通过左侧栏切换模拟面试、文件浏览和知识图谱。文件详情顶部展示基本信息和可点击的来源、关联与反向链接卡片；文件树不再使用来源悬浮提示。选择文件不会编辑知识或推进面试。普通笔记可以浏览，但没有发布标志不会默认索引。
-
-“新建面试”弹窗中的简历与项目材料只用于本场面试，不写入知识库。中央对话区上方的“拓展现有知识库”打开专用建库弹窗：选择并上传文件即授权建库，弹窗自动关闭，右上角通知展示真实进度；后台完成解析、关联、发布和索引。不暴露排队、连接等内部操作选项。通知按红/黄/绿区分待执行、进行中和完成。
-
-原件、任务和授权状态持久化。未授权暂存不会被后台或重启拾取；旧版尚未完成的自动上传任务暂停待明确启动。来源ID、保守合并、失败重试和索引复用机制保留。模型调用可能产生费用，只有明确启动后才发起。
-
-新版启动和界面说明见 [Web 工作台](docs/web-workbench.md)，知识库流程说明见 [工作台与知识库说明](docs/wiki-intake.md)。现有知识页保留，工作台改造不等于已解决A-RAG的Wiki采用率或接入知识评分。
-
-### 知识图谱与阶段化 Wiki 更新
-
-图谱、sources/concepts/entities 核心生成、可选导航/深化阶段，以及复制文件后的授权补链已接入现有工作台。细则见 [知识图谱与分阶段工作流](docs/knowledge-graph-workflows.md)。复制文件只提醒，模型分析与补链写入分别需要确认，不会自动授予检索发布资格。
-
-知识页的发布状态由 `src/knowledge_metadata.py` 维护在可重建的 SQLite 元数据中：内容哈希变化会退回 `pending_review`，只有 `approved` 页面才进入向量索引与检索；`src/wiki_watcher.py` 轮询外部编辑，防抖后同步状态。
-
-### 向量索引与执行记录
-
-知识库向量使用 LanceDB 持久化（`data/.wiki-index/`，已被 Git 忽略），按 namespace 隔离并保留上一版表以支持回滚。索引只收录 `approved` 页面，内容哈希未变的 chunk 复用旧向量，不重复计费。
-
-生成过程按阶段/页面记录调用、响应结构、耗时和缓存复用。核心任务失败后停在可恢复检查点，不再整批自动重试三轮；在进度详情或知识任务内可查看记录、明确调整预算并恢复。历史任务缺少记录时不估算旧费用。细则见 [执行与恢复](docs/wiki-execution-recovery.md)。
-
-## 已知问题与排查
-
-| 现象 | 原因 | 处理 |
-| --- | --- | --- |
-| 模型调用抛 `SSL: UNEXPECTED_EOF_WHILE_READING` | Windows 系统代理（如 Clash 的 `127.0.0.1:7897`）被 httpx 的 `trust_env` 读取，但该代理不可用于这些域名 | 设置 `NO_PROXY=api.deepseek.com,dashscope.aliyuncs.com,127.0.0.1,localhost` 后再启动 |
-| 知识已保存但提示“索引更新失败：BadRequestError” | `sync_wiki_index` 的异常被吞掉，事件只记录 `error_type`，前端看不到 provider 原文（如百炼欠费的 `Arrearage`） | 查看执行记录；百炼侧确认账号状态后重跑索引，无需重建知识库 |
-| 建库停在“已达到本任务预算” | 任务级预算（默认 64 次调用 / 10 万 token / 600 秒）用完即停机 | 在“查看执行记录与恢复预算”中明确提高上限后从检查点恢复；已消费计数不清零 |
+> 文档中的早期设计记录可能保留历史状态；当前能力与限制以源码、本 README 和最新缺陷记录为准。
