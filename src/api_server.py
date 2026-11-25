@@ -100,6 +100,17 @@ def owner(request):
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+def public_interview_state(state, question, default_turn=0):
+    return {
+        'question': question,
+        'turn_count': state.get('turn_count', default_turn),
+        'history': state.get('interview_history', []),
+        'evaluations': state.get('evaluation_history', []),
+        'report': state.get('interview_report'),
+        'metrics': state.get('stage_metrics', []),
+    }
+
+
 def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=create_embedding_client,
                interview_factory=None,frontend_dist=None):
     service=service or IntakeService()
@@ -163,21 +174,39 @@ def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=
 
     def hydrate(owner_id):
         from interview_graph import create_interview_graph
-        rows=persistence.list(owner_id)
-        for row in rows:
-            if row['id'] in sessions: continue
-            try:
-                run=restore_interview(lambda: create_interview_graph(checkpointer=checkpoints.saver), row['id'])
-            except Exception:
+        for row in persistence.list(owner_id):
+            session_id = row['id']
+            if session_id in sessions:
                 continue
-            record=Session(row['id'],row['owner'],row['name'],row['max_turns'],created=row['created_at'],run=run,
-                           busy=False,status='interrupted' if row['status'] in ('processing','preparing') else row['status'],
-                           phase='已恢复到上一完整轮次' if row['status'] in ('processing','preparing') else row['phase'],error=row['error'],profile_version_id=row['profile_version_id'])
-            state=run.state
-            record.public={'question':run.question,'turn_count':state.get('turn_count',row['last_complete_turn']),
-                           'history':state.get('interview_history',[]),'evaluations':state.get('evaluation_history',[]),
-                           'report':state.get('interview_report'),'metrics':state.get('stage_metrics',[])}
-            sessions[row['id']]=record
+
+            status, phase, error = row['status'], row['phase'], row['error']
+            run, question, state = None, None, {}
+            if status != 'error':
+                try:
+                    restored = restore_interview(lambda: create_interview_graph(checkpointer=checkpoints.saver), session_id)
+                    state, question = restored.state, restored.question
+                except Exception:
+                    state = {}
+
+                if question is not None:
+                    run = restored
+                    status, phase, error = 'waiting', '等待回答', ''
+                elif state.get('interview_report'):
+                    status, phase, error = 'completed', '面试结束', ''
+                elif state.get('interview_status') == 'no_claims':
+                    status, phase, error = 'no_claims', '面试结束', ''
+                else:
+                    state = persistence.last_published_state(row)
+                    if status in ('waiting', 'processing', 'preparing', 'interrupted'):
+                        status, phase = 'interrupted', '面试已中断'
+                        error = '找不到可继续作答的检查点。可以查看已保存的记录，或新建面试。'
+
+            sessions[session_id] = Session(
+                session_id, row['owner'], row['name'], row['max_turns'], created=row['created_at'],
+                run=run, busy=False, status=status, phase=phase, error=error,
+                public=public_interview_state(state, question, row['last_complete_turn']),
+                profile_version_id=row['profile_version_id'],
+            )
 
     def session_for(request,id):
         who=owner(request)
@@ -193,9 +222,7 @@ def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=
 
     def publish_snapshot(record):
         state=record.run.state
-        public={'question':record.run.question,'turn_count':state.get('turn_count',0),
-                'history':state.get('interview_history',[]),'evaluations':state.get('evaluation_history',[]),
-                'report':state.get('interview_report'),'metrics':state.get('stage_metrics',[])}
+        public=public_interview_state(state,record.run.question)
         with record.lock:
             record.public=public;record.busy=False;record.error=''
             record.status='waiting' if public['question'] else 'completed' if public['report'] else 'no_claims'
@@ -211,21 +238,24 @@ def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=
             documents=[load_uploaded_document(name,content) for name,content in files]
             profile=profiles.save(documents[0],files[0][1])
             persistence.set_profile(record.id,profile.id,profiles.snapshot(profile.id))
+            with record.lock:
+                record.profile_version_id = profile.id
             elapsed=round((perf_counter()-started)*1000)
             if interview_factory is None:
                 from interview_session import start_interview
                 from interview_graph import create_interview_graph
                 record.run=start_interview(documents,record.max_turns,
                     graph_factory=lambda: create_interview_graph(checkpointer=checkpoints.saver),
-                    profile_version_id=getattr(record,'profile_version_id',None),
+                    thread_id=record.id,profile_version_id=profile.id,
                     document_ms=elapsed,on_progress=lambda event:progress(record,event))
             else:
                 record.run=interview_factory(documents,record.max_turns,document_ms=elapsed,on_progress=lambda event:progress(record,event))
             publish_snapshot(record)
-        except DocumentLoadError as error:
-            with record.lock:record.busy=False;record.status='error';record.error=str(error)
-        except Exception:
-            with record.lock:record.busy=False;record.status='error';record.error='面试准备失败，请检查模型服务和材料后重新开始。'
+        except Exception as error:
+            message = str(error) if isinstance(error, DocumentLoadError) else '面试准备失败，请检查模型服务和材料后重新开始。'
+            with record.lock:
+                persistence.save(record.id, status='error', phase='准备失败', error=message)
+                record.busy, record.status, record.phase, record.error = False, 'error', '准备失败', message
 
     def resume(record,text):
         try:

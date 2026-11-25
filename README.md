@@ -7,7 +7,7 @@
 ![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph-1C3C3C)
 ![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)
 
-> **当前定位**：本机单实例学习与项目复盘工具，不是公网多用户 SaaS。默认界面为 React + FastAPI；面试记录、图检查点和知识任务使用本地 SQLite 持久化。Web 面试的真实跨进程恢复仍需补充重启回归验证，暂不作为稳定能力承诺。
+> **当前定位**：本机单实例学习与项目复盘工具。默认界面为 React + FastAPI，面试记录、图检查点和知识任务使用本地 SQLite 持久化。使用同一浏览器且保留工作台 Cookie 时，等待作答的新会话可在服务重启后继续。缺少有效检查点的旧会话仍可查看已保存的历史和报告。
 
 ## 为什么做这个项目
 

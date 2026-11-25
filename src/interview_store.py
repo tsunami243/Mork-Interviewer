@@ -110,6 +110,14 @@ class InterviewStore:
             ids = [row["id"] for row in db.execute("SELECT id FROM interview_sessions WHERE owner=? ORDER BY updated_at DESC", (owner,)).fetchall()]
         return [self.get(session_id, owner) for session_id in ids]
 
+    @staticmethod
+    def last_published_state(row: dict) -> dict:
+        for event in row["events"]:
+            payload = json.loads(event["payload"])
+            if payload.get("status") in ("waiting", "completed", "no_claims"):
+                return payload["state"]
+        return {}
+
     def delete(self, session_id: str, owner: str) -> bool:
         with self.connection() as db:
             row = db.execute("SELECT 1 FROM interview_sessions WHERE id=? AND owner=?", (session_id, owner)).fetchone()
