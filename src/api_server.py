@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sqlite3
 from threading import Event,Lock,Thread
 from time import perf_counter,time
 from uuid import uuid4
@@ -208,10 +209,8 @@ def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=
                 profile_version_id=row['profile_version_id'],
             )
 
-    def session_for(request,id):
-        who=owner(request)
-        with sessions_lock:
-            hydrate(who);record=sessions.get(id)
+    def owned_session(who,id):
+        hydrate(who);record=sessions.get(id)
         if record is None or record.owner!=who:raise HTTPException(404,'会话不存在')
         return record
 
@@ -481,7 +480,9 @@ def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=
         return {'sessions':[record.snapshot() for record in records]}
 
     @app.get('/api/interviews/{id}')
-    def interview(request:Request,id:str):return session_for(request,id).snapshot()
+    def interview(request:Request,id:str):
+        with sessions_lock:
+            return owned_session(owner(request),id).snapshot()
 
     @app.post('/api/interviews',status_code=202)
     async def start(request:Request,resume_file:UploadFile=File(...),project_file:UploadFile=File(...),max_turns:int=Form(5)):
@@ -496,8 +497,11 @@ def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=
             if sum(r.busy for r in sessions.values())>=12:raise HTTPException(429,'服务当前繁忙，请稍后再开始')
             if sum(r.busy for r in own)>=2:raise HTTPException(429,'已有两场面试正在处理，请稍后再开始')
             if len(own)>=6:
-                idle=next((r for r in own if not r.busy),None)
-                if idle:sessions.pop(idle.id,None)
+                for candidate in own:
+                    with candidate.lock:
+                        if not candidate.busy:
+                            sessions.pop(candidate.id)
+                            break
             record=Session(uuid4().hex,who,Path(project_file.filename or '面试').stem[:60],max_turns)
             persistence.create(session_id=record.id,owner=who,name=record.name,max_turns=max_turns,
                                profile_version_id=None,profile_snapshot=None)
@@ -507,19 +511,20 @@ def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=
 
     @app.post('/api/interviews/{id}/answers',status_code=202)
     def answer(request:Request,id:str,data:Answer):
-        record=session_for(request,id);text=data.answer.strip()
-        if not text:raise HTTPException(400,'请先填写回答')
+        who=owner(request);text=data.answer.strip()
         key=hashlib.sha256(text.encode()).hexdigest()
-        with record.lock:
-            old=record.submissions.get(data.request_id)
-            if old is not None:
-                if old!=key:raise HTTPException(409,'同一提交编号不能对应不同回答')
-                duplicate=True
-            else:
-                duplicate=False
-                if record.busy:raise HTTPException(409,'上一轮仍在处理中')
-                if record.status not in ('waiting','interrupted') or record.run is None:raise HTTPException(409,'当前没有可回答的问题')
-                record.submissions[data.request_id]=key;record.busy=True;record.status='processing';record.phase='评估回答'
+        with sessions_lock:
+            record=owned_session(who,id)
+            if not text:raise HTTPException(400,'请先填写回答')
+            with record.lock:
+                old=record.submissions.get(data.request_id)
+                duplicate=old is not None
+                if duplicate:
+                    if old!=key:raise HTTPException(409,'同一提交编号不能对应不同回答')
+                else:
+                    if record.busy:raise HTTPException(409,'上一轮仍在处理中')
+                    if record.status not in ('waiting','interrupted') or record.run is None:raise HTTPException(409,'当前没有可回答的问题')
+                    record.submissions[data.request_id]=key;record.busy=True;record.status='processing';record.phase='评估回答'
         if not duplicate:executor.submit(resume,record,text)
         return record.snapshot()
 
@@ -527,10 +532,19 @@ def create_app(service=None,*,llm_factory=configured_wiki_llm,embedding_factory=
     def delete_interview(request:Request,id:str):
         who=owner(request)
         with sessions_lock:
-            record=sessions.get(id)
-            if record is not None and record.owner!=who: raise HTTPException(404,'会话不存在')
-            if not persistence.delete(id,who): raise HTTPException(404,'会话不存在')
-            sessions.pop(id,None)
+            try:
+                if not persistence.exists(id,who):raise HTTPException(404,'会话不存在')
+                record=sessions.get(id)
+                if record is not None:
+                    with record.lock:
+                        if record.busy:raise HTTPException(409,'面试正在处理中，请稍后再删除')
+                try:
+                    checkpoints.saver.delete_thread(id)
+                    if not persistence.delete(id,who):raise HTTPException(404,'会话不存在')
+                finally:
+                    sessions.pop(id,None)
+            except sqlite3.Error:
+                raise HTTPException(503,'暂时无法删除面试，请重试') from None
         return {'deleted':id}
 
     if (dist/'assets').is_dir():app.mount('/assets',StaticFiles(directory=dist/'assets'),name='assets')
