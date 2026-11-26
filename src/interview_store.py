@@ -118,6 +118,10 @@ class InterviewStore:
                 return payload["state"]
         return {}
 
+    def exists(self, session_id: str, owner: str) -> bool:
+        with self.connection() as db:
+            return db.execute("SELECT 1 FROM interview_sessions WHERE id=? AND owner=?", (session_id, owner)).fetchone() is not None
+
     def delete(self, session_id: str, owner: str) -> bool:
         with self.connection() as db:
             row = db.execute("SELECT 1 FROM interview_sessions WHERE id=? AND owner=?", (session_id, owner)).fetchone()
